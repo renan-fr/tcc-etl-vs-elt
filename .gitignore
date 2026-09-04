@@ -1,0 +1,33 @@
+```gitignore
+# Dados brutos
+data/raw/*
+!data/raw/.gitkeep
+
+# Resultados gerados
+results/*.csv
+results/graficos/*
+!results/graficos/.gitkeep
+
+# Ambiente Python
+.venv/
+venv/
+env/
+
+# Cache Python
+__pycache__/
+*.py[cod]
+
+# Variáveis de ambiente
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDEs
+.vscode/
+.idea/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+```
