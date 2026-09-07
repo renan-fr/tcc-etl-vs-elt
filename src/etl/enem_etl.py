@@ -100,6 +100,11 @@ MAP_PRESENCA = {
     2: "Eliminado na prova",
 }
 
+MAP_INTERNET = {
+    "A": "Não",
+    "B": "Sim",
+}
+
 MAP_REGIAO = {
     "AC": "Norte",
     "AP": "Norte",
@@ -134,6 +139,9 @@ MAP_REGIAO = {
     "SC": "Sul",
 }
 
+# PARTICIPANTES
+# --------------
+
 COLUNAS_PARTICIPANTES = [
     "NU_INSCRICAO",
     "TP_FAIXA_ETARIA",
@@ -144,6 +152,7 @@ COLUNAS_PARTICIPANTES = [
     "NO_MUNICIPIO_PROVA",
     "SG_UF_PROVA",
     "Q007",
+    "Q020",
     "Q023",
 ]
 
@@ -160,6 +169,7 @@ def transformar_participantes(df: pd.DataFrame) -> pd.DataFrame:
     )
     df["IN_TREINEIRO"] = df["IN_TREINEIRO"].map(MAP_TREINEIRO)
     df["Q007"] = df["Q007"].map(MAP_RENDA)
+    df["Q020"] = df["Q020"].map(MAP_INTERNET)
     df["Q023"] = df["Q023"].map(MAP_TIPO_ESCOLA_EM)
 
     df["REGIAO_PROVA"] = df["SG_UF_PROVA"].map(MAP_REGIAO)
@@ -175,6 +185,7 @@ def transformar_participantes(df: pd.DataFrame) -> pd.DataFrame:
             "NO_MUNICIPIO_PROVA": "municipio_prova",
             "SG_UF_PROVA": "uf_prova",
             "Q007": "faixa_renda",
+            "Q020": "possui_internet",
             "Q023": "tipo_escola_em",
             "REGIAO_PROVA": "regiao_prova",
         }
@@ -210,7 +221,9 @@ def transformar_resultados(df: pd.DataFrame) -> pd.DataFrame:
 
     df["REGIAO_ESCOLA"] = df["SG_UF_ESC"].map(MAP_REGIAO)
 
-    df["TP_DEPENDENCIA_ADM_ESC"] = df["TP_DEPENDENCIA_ADM_ESC"].map(MAP_DEPENDENCIA_ESCOLA)
+    df["TP_DEPENDENCIA_ADM_ESC"] = df[
+        "TP_DEPENDENCIA_ADM_ESC"
+    ].map(MAP_DEPENDENCIA_ESCOLA)
 
     df["TP_LOCALIZACAO_ESC"] = df[
         "TP_LOCALIZACAO_ESC"
@@ -233,6 +246,7 @@ def transformar_resultados(df: pd.DataFrame) -> pd.DataFrame:
 
     df["NOTA_MEDIA_OBJETIVAS"] = df[colunas_notas].mean(
         axis=1,
+        skipna=False,
     )
 
     df["PRESENTE_COMPLETO"] = (
