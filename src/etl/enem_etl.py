@@ -1,7 +1,4 @@
 import pandas as pd
-import numpy as np
-
-LIMITE_TESTE = 100_000
 
 MAP_FAIXA_ETARIA = {
     1: "Menor de 17 anos",
