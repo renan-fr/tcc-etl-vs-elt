@@ -1,11 +1,9 @@
 from pathlib import Path
 import pandas as pd
-
+import argparse
 
 # CONFIGURAÇÕES
 # -------------
-
-LIMITE_TESTE = 100_000
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -21,7 +19,7 @@ PASTA_ENEM = (
 CAMINHO_PARTICIPANTES = PASTA_ENEM / "PARTICIPANTES_2024.csv"
 CAMINHO_RESULTADOS = PASTA_ENEM / "RESULTADOS_2024.csv"
 
-# EXTRACAO
+# EXTRAÇÃO
 # ----------
 
 def extrair_participantes(limite: int | None = None) -> pd.DataFrame:
@@ -326,19 +324,29 @@ def transformar_resultados(df: pd.DataFrame) -> pd.DataFrame:
 # MAIN
 # -------
 
-def main():
-    participantes = extrair_participantes(LIMITE_TESTE)
-    resultados = extrair_resultados(LIMITE_TESTE)
+def main(limite: int):
+    participantes = extrair_participantes(limite)
+    resultados = extrair_resultados(limite)
 
     participantes_tratados = transformar_participantes(participantes)
     resultados_tratados = transformar_resultados(resultados)
 
     print("Participantes:", participantes_tratados.shape)
-    print(participantes_tratados.head())
-
-    print("\nResultados:", resultados_tratados.shape)
-    print(resultados_tratados.head())
+    print("Resultados:", resultados_tratados.shape)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Pipeline ETL dos microdados do ENEM 2024"
+    )
+
+    parser.add_argument(
+        "--limite",
+        type=int,
+        default=100_000,
+        help="Quantidade máxima de linhas lidas de cada arquivo",
+    )
+
+    args = parser.parse_args()
+
+    main(args.limite)
