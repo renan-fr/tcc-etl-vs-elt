@@ -1,4 +1,50 @@
+from pathlib import Path
 import pandas as pd
+
+
+# CONFIGURAÇÕES
+# -------------
+
+LIMITE_TESTE = 100_000
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+
+PASTA_ENEM = (
+    BASE_DIR
+    / "data"
+    / "raw"
+    / "enem"
+    / "microdados_enem_2024"
+    / "DADOS"
+)
+
+CAMINHO_PARTICIPANTES = PASTA_ENEM / "PARTICIPANTES_2024.csv"
+CAMINHO_RESULTADOS = PASTA_ENEM / "RESULTADOS_2024.csv"
+
+# EXTRACAO
+# ----------
+
+def extrair_participantes(limite: int | None = None) -> pd.DataFrame:
+    return pd.read_csv(
+        CAMINHO_PARTICIPANTES,
+        sep=";",
+        encoding="latin-1",
+        usecols=COLUNAS_PARTICIPANTES,
+        nrows=limite,
+    )
+
+
+def extrair_resultados(limite: int | None = None) -> pd.DataFrame:
+    return pd.read_csv(
+        CAMINHO_RESULTADOS,
+        sep=";",
+        encoding="latin-1",
+        usecols=COLUNAS_RESULTADOS,
+        nrows=limite,
+    )
+
+# MAPEAMENTO
+# ------------
 
 MAP_FAIXA_ETARIA = {
     1: "Menor de 17 anos",
@@ -276,3 +322,23 @@ def transformar_resultados(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     return df
+
+# MAIN
+# -------
+
+def main():
+    participantes = extrair_participantes(LIMITE_TESTE)
+    resultados = extrair_resultados(LIMITE_TESTE)
+
+    participantes_tratados = transformar_participantes(participantes)
+    resultados_tratados = transformar_resultados(resultados)
+
+    print("Participantes:", participantes_tratados.shape)
+    print(participantes_tratados.head())
+
+    print("\nResultados:", resultados_tratados.shape)
+    print(resultados_tratados.head())
+
+
+if __name__ == "__main__":
+    main()
