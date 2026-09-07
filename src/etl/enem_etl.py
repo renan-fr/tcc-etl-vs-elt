@@ -181,3 +181,87 @@ def transformar_participantes(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     return df
+
+
+# RESULTADOS
+# -----------
+
+COLUNAS_RESULTADOS = [
+    "NU_SEQUENCIAL",
+    "NO_MUNICIPIO_ESC",
+    "SG_UF_ESC",
+    "TP_DEPENDENCIA_ADM_ESC",
+    "TP_LOCALIZACAO_ESC",
+    "TP_PRESENCA_CN",
+    "TP_PRESENCA_CH",
+    "TP_PRESENCA_LC",
+    "TP_PRESENCA_MT",
+    "NU_NOTA_CN",
+    "NU_NOTA_CH",
+    "NU_NOTA_LC",
+    "NU_NOTA_MT",
+    "NU_NOTA_REDACAO",
+]
+
+
+def transformar_resultados(df: pd.DataFrame) -> pd.DataFrame:
+
+    df = df[COLUNAS_RESULTADOS].copy()
+
+    df["REGIAO_ESCOLA"] = df["SG_UF_ESC"].map(MAP_REGIAO)
+
+    df["TP_DEPENDENCIA_ADM_ESC"] = df["TP_DEPENDENCIA_ADM_ESC"].map(MAP_DEPENDENCIA_ESCOLA)
+
+    df["TP_LOCALIZACAO_ESC"] = df[
+        "TP_LOCALIZACAO_ESC"
+    ].map(MAP_LOCALIZACAO_ESCOLA)
+
+    for coluna in [
+        "TP_PRESENCA_CN",
+        "TP_PRESENCA_CH",
+        "TP_PRESENCA_LC",
+        "TP_PRESENCA_MT",
+    ]:
+        df[coluna] = df[coluna].map(MAP_PRESENCA)
+
+    colunas_notas = [
+        "NU_NOTA_CN",
+        "NU_NOTA_CH",
+        "NU_NOTA_LC",
+        "NU_NOTA_MT",
+    ]
+
+    df["NOTA_MEDIA_OBJETIVAS"] = df[colunas_notas].mean(
+        axis=1,
+    )
+
+    df["PRESENTE_COMPLETO"] = (
+        (df["TP_PRESENCA_CN"] == "Presente na prova")
+        & (df["TP_PRESENCA_CH"] == "Presente na prova")
+        & (df["TP_PRESENCA_LC"] == "Presente na prova")
+        & (df["TP_PRESENCA_MT"] == "Presente na prova")
+    )
+
+    df = df.rename(
+        columns={
+            "NU_SEQUENCIAL": "id_resultado",
+            "NO_MUNICIPIO_ESC": "municipio_escola",
+            "SG_UF_ESC": "uf_escola",
+            "REGIAO_ESCOLA": "regiao_escola",
+            "TP_DEPENDENCIA_ADM_ESC": "dependencia_escola",
+            "TP_LOCALIZACAO_ESC": "localizacao_escola",
+            "TP_PRESENCA_CN": "presenca_cn",
+            "TP_PRESENCA_CH": "presenca_ch",
+            "TP_PRESENCA_LC": "presenca_lc",
+            "TP_PRESENCA_MT": "presenca_mt",
+            "NU_NOTA_CN": "nota_cn",
+            "NU_NOTA_CH": "nota_ch",
+            "NU_NOTA_LC": "nota_lc",
+            "NU_NOTA_MT": "nota_mt",
+            "NU_NOTA_REDACAO": "nota_redacao",
+            "NOTA_MEDIA_OBJETIVAS": "nota_media_objetivas",
+            "PRESENTE_COMPLETO": "presente_completo",
+        }
+    )
+
+    return df
