@@ -1,6 +1,56 @@
+from __future__ import annotations
+
 from pathlib import Path
 import pandas as pd
 import argparse
+
+
+VALORES_DESCONHECIDOS: list[dict[str, object]] = []
+VALOR_NAO_INFORMADO = "Não informado"
+
+
+def _registrar_desconhecidos(
+    serie: pd.Series,
+    mapeamento: dict,
+    coluna: str,
+) -> None:
+    conhecidos = set(mapeamento)
+    desconhecidos = serie.dropna()[~serie.dropna().isin(conhecidos)]
+
+    for valor, quantidade in desconhecidos.value_counts().items():
+        VALORES_DESCONHECIDOS.append(
+            {
+                "coluna": coluna,
+                "valor_original": valor,
+                "quantidade": int(quantidade),
+            }
+        )
+
+
+def _mapear_texto(
+    serie: pd.Series,
+    mapeamento: dict,
+    coluna: str,
+) -> pd.Series:
+    _registrar_desconhecidos(serie, mapeamento, coluna)
+    return serie.map(mapeamento).fillna(VALOR_NAO_INFORMADO)
+
+
+def _mapear_booleano(
+    serie: pd.Series,
+    mapeamento: dict,
+    coluna: str,
+) -> pd.Series:
+    _registrar_desconhecidos(serie, mapeamento, coluna)
+    return serie.map(mapeamento).astype("boolean")
+
+
+def relatorio_valores_desconhecidos() -> pd.DataFrame:
+    """Retorna os códigos desconhecidos encontrados durante a transformação."""
+    return pd.DataFrame(
+        VALORES_DESCONHECIDOS,
+        columns=["coluna", "valor_original", "quantidade"],
+    )
 
 # CONFIGURAÇÕES
 # -------------
@@ -90,8 +140,8 @@ MAP_SITUACAO_CONCLUSAO = {
 }
 
 MAP_TREINEIRO = {
-    0: "Não",
-    1: "Sim",
+    0: False,
+    1: True,
 }
 
 MAP_RENDA = {
@@ -142,8 +192,8 @@ MAP_PRESENCA = {
 }
 
 MAP_INTERNET = {
-    "A": "Não",
-    "B": "Sim",
+    "A": False,
+    "B": True,
 }
 
 MAP_REGIAO = {
@@ -202,18 +252,36 @@ def transformar_participantes(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df[COLUNAS_PARTICIPANTES].copy()
 
-    df["TP_FAIXA_ETARIA"] = df["TP_FAIXA_ETARIA"].map(MAP_FAIXA_ETARIA)
-    df["TP_SEXO"] = df["TP_SEXO"].map(MAP_SEXO)
-    df["TP_COR_RACA"] = df["TP_COR_RACA"].map(MAP_COR_RACA)
-    df["TP_ST_CONCLUSAO"] = df["TP_ST_CONCLUSAO"].map(
-        MAP_SITUACAO_CONCLUSAO
+    df["TP_FAIXA_ETARIA"] = _mapear_texto(
+        df["TP_FAIXA_ETARIA"], MAP_FAIXA_ETARIA, "TP_FAIXA_ETARIA"
     )
-    df["IN_TREINEIRO"] = df["IN_TREINEIRO"].map(MAP_TREINEIRO)
-    df["Q007"] = df["Q007"].map(MAP_RENDA)
-    df["Q020"] = df["Q020"].map(MAP_INTERNET)
-    df["Q023"] = df["Q023"].map(MAP_TIPO_ESCOLA_EM)
+    df["TP_SEXO"] = _mapear_texto(df["TP_SEXO"], MAP_SEXO, "TP_SEXO")
+    df["TP_COR_RACA"] = _mapear_texto(
+        df["TP_COR_RACA"], MAP_COR_RACA, "TP_COR_RACA"
+    )
+    df["TP_ST_CONCLUSAO"] = _mapear_texto(
+        df["TP_ST_CONCLUSAO"],
+        MAP_SITUACAO_CONCLUSAO,
+        "TP_ST_CONCLUSAO",
+    )
+    df["IN_TREINEIRO"] = _mapear_booleano(
+        df["IN_TREINEIRO"], MAP_TREINEIRO, "IN_TREINEIRO"
+    )
+    df["Q007"] = _mapear_texto(df["Q007"], MAP_RENDA, "Q007")
+    df["Q020"] = _mapear_booleano(df["Q020"], MAP_INTERNET, "Q020")
+    df["Q023"] = _mapear_texto(
+        df["Q023"], MAP_TIPO_ESCOLA_EM, "Q023"
+    )
 
-    df["REGIAO_PROVA"] = df["SG_UF_PROVA"].map(MAP_REGIAO)
+    uf_prova = df["SG_UF_PROVA"].copy()
+    df["REGIAO_PROVA"] = _mapear_texto(
+        uf_prova, MAP_REGIAO, "SG_UF_PROVA"
+    )
+    df["SG_UF_PROVA"] = uf_prova.fillna(VALOR_NAO_INFORMADO)
+    df["NO_MUNICIPIO_PROVA"] = df["NO_MUNICIPIO_PROVA"].fillna(
+        VALOR_NAO_INFORMADO
+    )
+    df["NU_INSCRICAO"] = df["NU_INSCRICAO"].astype("string")
 
     df = df.rename(
         columns={
@@ -248,6 +316,7 @@ COLUNAS_RESULTADOS = [
     "TP_PRESENCA_CH",
     "TP_PRESENCA_LC",
     "TP_PRESENCA_MT",
+    "TP_PRESENCA_REDACAO",
     "NU_NOTA_CN",
     "NU_NOTA_CH",
     "NU_NOTA_LC",
@@ -260,23 +329,35 @@ def transformar_resultados(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df[COLUNAS_RESULTADOS].copy()
 
-    df["REGIAO_ESCOLA"] = df["SG_UF_ESC"].map(MAP_REGIAO)
+    uf_escola = df["SG_UF_ESC"].copy()
+    df["REGIAO_ESCOLA"] = _mapear_texto(
+        uf_escola, MAP_REGIAO, "SG_UF_ESC"
+    )
+    df["SG_UF_ESC"] = uf_escola.fillna(VALOR_NAO_INFORMADO)
+    df["NO_MUNICIPIO_ESC"] = df["NO_MUNICIPIO_ESC"].fillna(
+        VALOR_NAO_INFORMADO
+    )
 
-    df["TP_DEPENDENCIA_ADM_ESC"] = df[
-        "TP_DEPENDENCIA_ADM_ESC"
-    ].map(MAP_DEPENDENCIA_ESCOLA)
+    df["TP_DEPENDENCIA_ADM_ESC"] = _mapear_texto(
+        df["TP_DEPENDENCIA_ADM_ESC"],
+        MAP_DEPENDENCIA_ESCOLA,
+        "TP_DEPENDENCIA_ADM_ESC",
+    )
 
-    df["TP_LOCALIZACAO_ESC"] = df[
-        "TP_LOCALIZACAO_ESC"
-    ].map(MAP_LOCALIZACAO_ESCOLA)
+    df["TP_LOCALIZACAO_ESC"] = _mapear_texto(
+        df["TP_LOCALIZACAO_ESC"],
+        MAP_LOCALIZACAO_ESCOLA,
+        "TP_LOCALIZACAO_ESC",
+    )
 
     for coluna in [
         "TP_PRESENCA_CN",
         "TP_PRESENCA_CH",
         "TP_PRESENCA_LC",
         "TP_PRESENCA_MT",
+        "TP_PRESENCA_REDACAO",
     ]:
-        df[coluna] = df[coluna].map(MAP_PRESENCA)
+        df[coluna] = _mapear_texto(df[coluna], MAP_PRESENCA, coluna)
 
     colunas_notas = [
         "NU_NOTA_CN",
@@ -288,14 +369,17 @@ def transformar_resultados(df: pd.DataFrame) -> pd.DataFrame:
     df["NOTA_MEDIA_OBJETIVAS"] = df[colunas_notas].mean(
         axis=1,
         skipna=False,
-    )
+    ).round(2)
 
     df["PRESENTE_COMPLETO"] = (
         (df["TP_PRESENCA_CN"] == "Presente na prova")
         & (df["TP_PRESENCA_CH"] == "Presente na prova")
         & (df["TP_PRESENCA_LC"] == "Presente na prova")
         & (df["TP_PRESENCA_MT"] == "Presente na prova")
+        & (df["TP_PRESENCA_REDACAO"] == "Presente na prova")
     )
+
+    df["NU_SEQUENCIAL"] = df["NU_SEQUENCIAL"].astype("string")
 
     df = df.rename(
         columns={
@@ -309,6 +393,7 @@ def transformar_resultados(df: pd.DataFrame) -> pd.DataFrame:
             "TP_PRESENCA_CH": "presenca_ch",
             "TP_PRESENCA_LC": "presenca_lc",
             "TP_PRESENCA_MT": "presenca_mt",
+            "TP_PRESENCA_REDACAO": "presenca_redacao",
             "NU_NOTA_CN": "nota_cn",
             "NU_NOTA_CH": "nota_ch",
             "NU_NOTA_LC": "nota_lc",
@@ -333,6 +418,13 @@ def main(limite: int):
 
     print("Participantes:", participantes_tratados.shape)
     print("Resultados:", resultados_tratados.shape)
+
+    desconhecidos = relatorio_valores_desconhecidos()
+    if desconhecidos.empty:
+        print("Valores desconhecidos: nenhum")
+    else:
+        print("Valores desconhecidos:")
+        print(desconhecidos.to_string(index=False))
 
 
 if __name__ == "__main__":

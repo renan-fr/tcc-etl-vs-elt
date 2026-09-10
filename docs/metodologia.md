@@ -392,15 +392,121 @@ Esses registros serão armazenados de forma estruturada para posterior análise 
 
 ---
 
-## 16. Pontos ainda a detalhar durante a implementação
+## 16. Contrato final da base ENEM
+
+A base ENEM produzirá duas tabelas finais independentes. Não haverá `JOIN` entre
+elas, nem relacionamento por chave estrangeira. Cada tabela alimentará gráficos
+com objetivos diferentes.
+
+### 16.1 Tabela `enem_participantes`
+
+Cada registro representa um participante no arquivo de participantes.
+
+As colunas finais são:
+
+```text
+id_participante       TEXT
+faixa_etaria          TEXT
+sexo                  TEXT
+cor_raca              TEXT
+situacao_conclusao    TEXT
+treineiro             BOOLEAN
+municipio_prova       TEXT
+uf_prova              TEXT
+faixa_renda           TEXT
+possui_internet       BOOLEAN
+tipo_escola_em        TEXT
+regiao_prova          TEXT
+```
+
+Essa tabela será utilizada para gráficos demográficos, sociais e geográficos.
+
+### 16.2 Tabela `enem_resultados`
+
+Cada registro representa um resultado no arquivo de resultados.
+
+As colunas finais são:
+
+```text
+id_resultado              TEXT
+municipio_escola          TEXT
+uf_escola                 TEXT
+dependencia_escola        TEXT
+localizacao_escola        TEXT
+presenca_cn               TEXT
+presenca_ch               TEXT
+presenca_lc               TEXT
+presenca_mt               TEXT
+presenca_redacao          TEXT
+nota_cn                   NUMERIC
+nota_ch                   NUMERIC
+nota_lc                   NUMERIC
+nota_mt                   NUMERIC
+nota_redacao              NUMERIC
+regiao_escola             TEXT
+nota_media_objetivas      NUMERIC
+presente_completo         BOOLEAN
+```
+
+Essa tabela será utilizada para gráficos de presença, desempenho e
+características das escolas.
+
+Os identificadores das duas tabelas são independentes. Não será exigida
+correspondência entre `id_participante` e `id_resultado`.
+
+### 16.3 Nulos, categorias e valores desconhecidos
+
+Valores textuais ausentes serão representados por `Não informado`. Valores
+numéricos ausentes permanecerão nulos, inclusive quando a ausência decorrer da
+falta do participante à prova.
+
+Indicadores booleanos poderão permanecer nulos quando não houver informação.
+Valores de origem que não estiverem nos mapeamentos conhecidos serão registrados
+em relatório, sem interromper inicialmente o processamento. A quantidade desses
+valores será acompanhada para avaliar posteriormente se é necessário alterar o
+tratamento.
+
+As categorias finais serão entregues apenas como texto, sem duplicar os códigos
+originais.
+
+### 16.4 Regras derivadas
+
+As regiões serão derivadas da UF correspondente à prova ou à escola.
+
+`nota_media_objetivas` será a média de CN, CH, LC e MT. A média usará `skipna=False`,
+será nula quando alguma dessas quatro notas estiver ausente e será arredondada
+para duas casas decimais. A nota da redação será mantida separadamente e não
+participará dessa média.
+
+`presente_completo` será verdadeiro somente quando o participante estiver
+presente em CN, CH, LC, MT e redação. A redação participa dessa regra, mas não da
+média objetiva.
+
+### 16.5 Validações
+
+Cada tabela deverá ser validada antes da carga final. As validações abrangerão:
+
+- presença e estrutura das colunas esperadas;
+- identificadores não nulos e sem duplicidade;
+- categorias pertencentes aos domínios definidos;
+- notas dentro dos limites válidos;
+- consistência entre UF e região;
+- consistência entre presenças, notas e `presente_completo`;
+- quantidade de linhas lidas e produzidas;
+- quantidade de nulos, valores `Não informado` e valores desconhecidos.
+
+Falhas estruturais, identificadores duplicados e notas inválidas serão erros
+críticos e interromperão o processamento. Valores desconhecidos e aumento de
+ausências serão inicialmente alertas, permitindo a continuidade e o registro
+para análise.
+
+## 17. Pontos ainda a detalhar durante a implementação
 
 O desenho experimental principal está definido.
 
 Permanecem como detalhes técnicos a serem fechados durante a exploração e implementação:
 
 - transformações exatas da base TSE;
-- transformações finais da base ENEM;
-- estrutura final das tabelas equivalentes;
 - versões das ferramentas;
 - características do armazenamento da máquina;
 - implementação definitiva do mecanismo de monitoramento;
