@@ -2,6 +2,7 @@
 # Dados brutos
 data/raw/*
 !data/raw/.gitkeep
+data/benchmark/
 
 # Resultados gerados
 results/*.csv

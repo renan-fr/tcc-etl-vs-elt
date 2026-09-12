@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from io import StringIO
 import os
 from pathlib import Path
 import argparse
+import threading
+import time
 from typing import Any
 
 import pandas as pd
+import psutil
 import psycopg2
 from psycopg2 import sql
 from dotenv import load_dotenv
@@ -26,6 +30,34 @@ class ResultadoValidacao:
     @property
     def valido(self) -> bool:
         return not self.erros
+
+
+@dataclass(frozen=True)
+class ResultadoBenchmark:
+    dataset: str
+    volume_configurado: int | None
+    arquitetura: str
+    rodada: int | None
+    aquecimento: bool
+    tempo_leitura: float
+    tempo_transformacao: float
+    tempo_validacao: float
+    tempo_carga: float
+    tempo_total: float
+    throughput: float
+    cpu_media_python: float
+    cpu_pico_python: float
+    ram_pico_python_mb: float
+    cpu_media_postgres: float
+    cpu_pico_postgres: float
+    ram_pico_postgres_mb: float
+    cpu_media_total: float
+    cpu_pico_total: float
+    ram_pico_total_mb: float
+    quantidade_registros: int
+    linhas_participantes: int
+    linhas_resultados: int
+    timestamp: str
 
 
 ConexaoPostgres = str | dict[str, Any]
@@ -937,20 +969,258 @@ def _imprimir_validacao(resultado: ResultadoValidacao) -> None:
         print("  Alertas: nenhum")
 
 
+class MonitorRecursos:
+    def __init__(self, intervalo_segundos: float = 0.5) -> None:
+        self.intervalo_segundos = intervalo_segundos
+        self._processo_python = psutil.Process()
+        self._parar = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._amostras: list[dict[str, float]] = []
+
+    def iniciar(self) -> None:
+        self._parar.clear()
+        self._processo_python.cpu_percent(interval=None)
+        self._thread = threading.Thread(target=self._coletar, daemon=True)
+        self._thread.start()
+
+    def parar(self) -> dict[str, float]:
+        self._parar.set()
+        if self._thread:
+            self._thread.join()
+        self._registrar_amostra()
+        return self._consolidar()
+
+    def _coletar(self) -> None:
+        while not self._parar.wait(self.intervalo_segundos):
+            self._registrar_amostra()
+
+    def _registrar_amostra(self) -> None:
+        processos_postgres = _obter_processos_postgres()
+
+        cpu_python = _cpu_percentual(self._processo_python)
+        ram_python = _memoria_rss(self._processo_python)
+        cpu_postgres = sum(_cpu_percentual(p) for p in processos_postgres)
+        ram_postgres = sum(_memoria_rss(p) for p in processos_postgres)
+
+        self._amostras.append(
+            {
+                "cpu_python": cpu_python,
+                "ram_python": float(ram_python),
+                "cpu_postgres": cpu_postgres,
+                "ram_postgres": float(ram_postgres),
+                "cpu_total": cpu_python + cpu_postgres,
+                "ram_total": float(ram_python + ram_postgres),
+            }
+        )
+
+    def _consolidar(self) -> dict[str, float]:
+        if not self._amostras:
+            return {
+                "cpu_media_python": 0.0,
+                "cpu_pico_python": 0.0,
+                "ram_pico_python_mb": 0.0,
+                "cpu_media_postgres": 0.0,
+                "cpu_pico_postgres": 0.0,
+                "ram_pico_postgres_mb": 0.0,
+                "cpu_media_total": 0.0,
+                "cpu_pico_total": 0.0,
+                "ram_pico_total_mb": 0.0,
+            }
+
+        return {
+            "cpu_media_python": _media("cpu_python", self._amostras),
+            "cpu_pico_python": _maximo("cpu_python", self._amostras),
+            "ram_pico_python_mb": _bytes_para_mb(
+                _maximo("ram_python", self._amostras)
+            ),
+            "cpu_media_postgres": _media("cpu_postgres", self._amostras),
+            "cpu_pico_postgres": _maximo("cpu_postgres", self._amostras),
+            "ram_pico_postgres_mb": _bytes_para_mb(
+                _maximo("ram_postgres", self._amostras)
+            ),
+            "cpu_media_total": _media("cpu_total", self._amostras),
+            "cpu_pico_total": _maximo("cpu_total", self._amostras),
+            "ram_pico_total_mb": _bytes_para_mb(
+                _maximo("ram_total", self._amostras)
+            ),
+        }
+
+
+def _obter_processos_postgres() -> list[psutil.Process]:
+    processos = []
+    for processo in psutil.process_iter(["name"]):
+        try:
+            nome = (processo.info["name"] or "").lower()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        if "postgres" in nome:
+            processos.append(processo)
+    return processos
+
+
+def _cpu_percentual(processo: psutil.Process) -> float:
+    try:
+        return processo.cpu_percent(interval=None)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return 0.0
+
+
+def _memoria_rss(processo: psutil.Process) -> int:
+    try:
+        return processo.memory_info().rss
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return 0
+
+
+def _media(chave: str, amostras: list[dict[str, float]]) -> float:
+    return sum(amostra[chave] for amostra in amostras) / len(amostras)
+
+
+def _maximo(chave: str, amostras: list[dict[str, float]]) -> float:
+    return max(amostra[chave] for amostra in amostras)
+
+
+def _bytes_para_mb(valor: float) -> float:
+    return valor / (1024 * 1024)
+
+
+def _salvar_resultado_benchmark(
+    resultado: ResultadoBenchmark,
+    caminho: Path,
+) -> None:
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    linha = pd.DataFrame([resultado.__dict__])
+    linha.to_csv(
+        caminho,
+        mode="a",
+        index=False,
+        header=not caminho.exists(),
+    )
+
+
+def _linhas_resumo_benchmark(resultado: ResultadoBenchmark) -> list[str]:
+    volume = resultado.volume_configurado
+    volume_formatado = "todos" if volume is None else str(volume)
+
+    return [
+        "Benchmark ETL ENEM:",
+        f"Volume configurado: {volume_formatado}",
+        f"Quantidade registros: {resultado.quantidade_registros}",
+        f"Linhas participantes: {resultado.linhas_participantes}",
+        f"Linhas resultados: {resultado.linhas_resultados}",
+        f"Tempo leitura: {resultado.tempo_leitura:.3f}s",
+        f"Tempo transformacao: {resultado.tempo_transformacao:.3f}s",
+        f"Tempo validacao: {resultado.tempo_validacao:.3f}s",
+        f"Tempo carga: {resultado.tempo_carga:.3f}s",
+        f"Tempo total: {resultado.tempo_total:.3f}s",
+        f"Throughput: {resultado.throughput:.2f} registros/s",
+        f"CPU media total: {resultado.cpu_media_total:.2f}%",
+        f"CPU pico total: {resultado.cpu_pico_total:.2f}%",
+        f"RAM pico total: {resultado.ram_pico_total_mb:.2f} MB",
+    ]
+
+
+def _resumo_benchmark_texto(resultado: ResultadoBenchmark) -> str:
+    linhas = _linhas_resumo_benchmark(resultado)
+    separador = "=" * 60
+    return f"{separador}\n" + "\n".join(linhas) + f"\n{separador}\n"
+
+
+def _salvar_resumo_benchmark(
+    resultado: ResultadoBenchmark,
+    caminho: Path,
+) -> None:
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    with caminho.open("a", encoding="utf-8") as arquivo:
+        arquivo.write(_resumo_benchmark_texto(resultado))
+        arquivo.write("\n")
+
+
+def _imprimir_resultado_benchmark(resultado: ResultadoBenchmark) -> None:
+    for linha in _linhas_resumo_benchmark(resultado):
+        print(linha)
+
+
+def _finalizar_benchmark(
+    benchmark: bool,
+    monitor: MonitorRecursos,
+    inicio_total: float,
+    tempo_leitura: float,
+    tempo_transformacao: float,
+    tempo_validacao: float,
+    tempo_carga: float,
+    limite: int | None,
+    linhas_participantes: int,
+    linhas_resultados: int,
+    rodada: int | None,
+    aquecimento: bool,
+    benchmark_output: Path | None,
+    benchmark_summary_output: Path | None,
+) -> None:
+    if not benchmark:
+        return
+
+    tempo_total = time.perf_counter() - inicio_total
+    recursos = monitor.parar()
+    quantidade_registros = linhas_participantes + linhas_resultados
+    throughput = quantidade_registros / tempo_total if tempo_total else 0.0
+
+    resultado = ResultadoBenchmark(
+        dataset="enem",
+        volume_configurado=limite,
+        arquitetura="etl",
+        rodada=rodada,
+        aquecimento=aquecimento,
+        tempo_leitura=tempo_leitura,
+        tempo_transformacao=tempo_transformacao,
+        tempo_validacao=tempo_validacao,
+        tempo_carga=tempo_carga,
+        tempo_total=tempo_total,
+        throughput=throughput,
+        quantidade_registros=quantidade_registros,
+        linhas_participantes=linhas_participantes,
+        linhas_resultados=linhas_resultados,
+        timestamp=datetime.now().isoformat(timespec="seconds"),
+        **recursos,
+    )
+
+    _imprimir_resultado_benchmark(resultado)
+    if benchmark_output:
+        _salvar_resultado_benchmark(resultado, benchmark_output)
+        print(f"Resultado do benchmark salvo em: {benchmark_output}")
+    if benchmark_summary_output:
+        _salvar_resumo_benchmark(resultado, benchmark_summary_output)
+        print(f"Resumo do benchmark salvo em: {benchmark_summary_output}")
+
+
 def main(
     limite: int | None,
     database_url: str | None,
     schema: str,
     if_exists: str,
     somente_validar: bool,
+    benchmark: bool = False,
+    benchmark_output: Path | None = None,
+    benchmark_summary_output: Path | None = None,
+    rodada: int | None = None,
+    aquecimento: bool = False,
 ) -> None:
+    inicio_total = time.perf_counter()
+    monitor = MonitorRecursos()
+    if benchmark:
+        monitor.iniciar()
+
     limpar_relatorio_valores_desconhecidos()
 
+    inicio = time.perf_counter()
     participantes = extrair_participantes(limite)
     resultados = extrair_resultados(limite)
+    tempo_leitura = time.perf_counter() - inicio
 
+    inicio = time.perf_counter()
     participantes_tratados = transformar_participantes(participantes)
     resultados_tratados = transformar_resultados(resultados)
+    tempo_transformacao = time.perf_counter() - inicio
 
     print("Participantes:", participantes_tratados.shape)
     print("Resultados:", resultados_tratados.shape)
@@ -962,6 +1232,7 @@ def main(
         print("Valores desconhecidos:")
         print(desconhecidos.to_string(index=False))
 
+    inicio = time.perf_counter()
     validacao_participantes = validar_participantes(
         participantes_tratados,
         linhas_origem=len(participantes),
@@ -970,23 +1241,45 @@ def main(
         resultados_tratados,
         linhas_origem=len(resultados),
     )
+    tempo_validacao = time.perf_counter() - inicio
 
     _imprimir_validacao(validacao_participantes)
     _imprimir_validacao(validacao_resultados)
 
     erros = validacao_participantes.erros + validacao_resultados.erros
     if erros:
+        if benchmark:
+            monitor.parar()
         raise SystemExit("Carga interrompida por erros críticos de validação.")
 
     if somente_validar:
         print("Carga ignorada (--somente-validar).")
+        _finalizar_benchmark(
+            benchmark=benchmark,
+            monitor=monitor,
+            inicio_total=inicio_total,
+            tempo_leitura=tempo_leitura,
+            tempo_transformacao=tempo_transformacao,
+            tempo_validacao=tempo_validacao,
+            tempo_carga=0.0,
+            limite=limite,
+            linhas_participantes=len(participantes),
+            linhas_resultados=len(resultados),
+            rodada=rodada,
+            aquecimento=aquecimento,
+            benchmark_output=benchmark_output,
+            benchmark_summary_output=benchmark_summary_output,
+        )
         return
 
     try:
         conexao_postgres = obter_conexao_postgres(database_url)
     except ValueError as erro:
+        if benchmark:
+            monitor.parar()
         raise SystemExit(str(erro)) from erro
 
+    inicio = time.perf_counter()
     carregar_enem(
         participantes_tratados,
         resultados_tratados,
@@ -994,10 +1287,28 @@ def main(
         schema=schema,
         if_exists=if_exists,
     )
+    tempo_carga = time.perf_counter() - inicio
 
     print(
         "Carga concluída: "
         f"{schema}.{TABELA_PARTICIPANTES} e {schema}.{TABELA_RESULTADOS}."
+    )
+
+    _finalizar_benchmark(
+        benchmark=benchmark,
+        monitor=monitor,
+        inicio_total=inicio_total,
+        tempo_leitura=tempo_leitura,
+        tempo_transformacao=tempo_transformacao,
+        tempo_validacao=tempo_validacao,
+        tempo_carga=tempo_carga,
+        limite=limite,
+        linhas_participantes=len(participantes),
+        linhas_resultados=len(resultados),
+        rodada=rodada,
+        aquecimento=aquecimento,
+        benchmark_output=benchmark_output,
+        benchmark_summary_output=benchmark_summary_output,
     )
 
 
@@ -1047,6 +1358,39 @@ if __name__ == "__main__":
         help="Executa extração, transformação e validação sem carregar no banco.",
     )
 
+    parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="Mede tempos, CPU e RAM da execucao.",
+    )
+
+    parser.add_argument(
+        "--benchmark-output",
+        type=Path,
+        default=BASE_DIR / "data" / "benchmark" / "enem_etl_resultados.csv",
+        help="Arquivo CSV de saida das metricas do benchmark.",
+    )
+
+    parser.add_argument(
+        "--benchmark-summary-output",
+        type=Path,
+        default=BASE_DIR / "data" / "benchmark" / "enem_etl_resumo.txt",
+        help="Arquivo TXT de saida do resumo do benchmark.",
+    )
+
+    parser.add_argument(
+        "--rodada",
+        type=int,
+        default=None,
+        help="Numero da rodada do benchmark.",
+    )
+
+    parser.add_argument(
+        "--aquecimento",
+        action="store_true",
+        help="Marca a execucao como aquecimento.",
+    )
+
     args = parser.parse_args()
 
     limite = None if args.limite == 0 else args.limite
@@ -1057,4 +1401,11 @@ if __name__ == "__main__":
         schema=args.schema,
         if_exists=args.if_exists,
         somente_validar=args.somente_validar,
+        benchmark=args.benchmark,
+        benchmark_output=args.benchmark_output if args.benchmark else None,
+        benchmark_summary_output=(
+            args.benchmark_summary_output if args.benchmark else None
+        ),
+        rodada=args.rodada,
+        aquecimento=args.aquecimento,
     )
