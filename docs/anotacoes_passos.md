@@ -84,6 +84,7 @@
 
 - Criamos `AGENTS.md` para lembrar de atualizar este arquivo a cada passo relevante.
 - Adicionamos `AGENTS.md` ao `.gitignore`, mantendo essa instrucao apenas local.
+- Adicionada RAM media ao benchmark como metrica complementar; RAM pico continua sendo a referencia principal de memoria.
 
 ## O que revisar antes de continuar
 

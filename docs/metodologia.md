@@ -168,8 +168,11 @@ Será utilizado principalmente o pico de memória RAM durante cada execução.
 
 Serão registrados, sempre que tecnicamente viável:
 
+- média de RAM do Python;
 - pico de RAM do Python;
+- média de RAM do PostgreSQL;
 - pico de RAM do PostgreSQL;
+- média combinada associada ao pipeline;
 - pico combinado associado ao pipeline.
 
 O consumo total do sistema operacional não será utilizado como principal referência, pois poderá incluir processos externos ao experimento.
@@ -191,6 +194,7 @@ Ao término de cada execução serão calculados valores consolidados como:
 
 - CPU média;
 - CPU máxima;
+- RAM média;
 - RAM máxima.
 
 O mesmo procedimento de monitoramento será aplicado a todos os cenários.
@@ -381,6 +385,7 @@ tempo_total
 throughput
 cpu_media
 cpu_pico
+ram_media
 ram_pico
 quantidade_registros
 timestamp

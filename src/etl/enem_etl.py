@@ -47,12 +47,15 @@ class ResultadoBenchmark:
     throughput: float
     cpu_media_python: float
     cpu_pico_python: float
+    ram_media_python_mb: float
     ram_pico_python_mb: float
     cpu_media_postgres: float
     cpu_pico_postgres: float
+    ram_media_postgres_mb: float
     ram_pico_postgres_mb: float
     cpu_media_total: float
     cpu_pico_total: float
+    ram_media_total_mb: float
     ram_pico_total_mb: float
     quantidade_registros: int
     linhas_participantes: int
@@ -1018,28 +1021,40 @@ class MonitorRecursos:
             return {
                 "cpu_media_python": 0.0,
                 "cpu_pico_python": 0.0,
+                "ram_media_python_mb": 0.0,
                 "ram_pico_python_mb": 0.0,
                 "cpu_media_postgres": 0.0,
                 "cpu_pico_postgres": 0.0,
+                "ram_media_postgres_mb": 0.0,
                 "ram_pico_postgres_mb": 0.0,
                 "cpu_media_total": 0.0,
                 "cpu_pico_total": 0.0,
+                "ram_media_total_mb": 0.0,
                 "ram_pico_total_mb": 0.0,
             }
 
         return {
             "cpu_media_python": _media("cpu_python", self._amostras),
             "cpu_pico_python": _maximo("cpu_python", self._amostras),
+            "ram_media_python_mb": _bytes_para_mb(
+                _media("ram_python", self._amostras)
+            ),
             "ram_pico_python_mb": _bytes_para_mb(
                 _maximo("ram_python", self._amostras)
             ),
             "cpu_media_postgres": _media("cpu_postgres", self._amostras),
             "cpu_pico_postgres": _maximo("cpu_postgres", self._amostras),
+            "ram_media_postgres_mb": _bytes_para_mb(
+                _media("ram_postgres", self._amostras)
+            ),
             "ram_pico_postgres_mb": _bytes_para_mb(
                 _maximo("ram_postgres", self._amostras)
             ),
             "cpu_media_total": _media("cpu_total", self._amostras),
             "cpu_pico_total": _maximo("cpu_total", self._amostras),
+            "ram_media_total_mb": _bytes_para_mb(
+                _media("ram_total", self._amostras)
+            ),
             "ram_pico_total_mb": _bytes_para_mb(
                 _maximo("ram_total", self._amostras)
             ),
@@ -1116,6 +1131,7 @@ def _linhas_resumo_benchmark(resultado: ResultadoBenchmark) -> list[str]:
         f"Throughput: {resultado.throughput:.2f} registros/s",
         f"CPU media total: {resultado.cpu_media_total:.2f}%",
         f"CPU pico total: {resultado.cpu_pico_total:.2f}%",
+        f"RAM media total: {resultado.ram_media_total_mb:.2f} MB",
         f"RAM pico total: {resultado.ram_pico_total_mb:.2f} MB",
     ]
 
