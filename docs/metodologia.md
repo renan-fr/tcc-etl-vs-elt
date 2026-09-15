@@ -61,7 +61,14 @@ A variação de volume será utilizada para analisar como cada abordagem se comp
 
 ## 4. Implementação dos pipelines
 
-As duas abordagens deverão gerar resultados finais logicamente equivalentes.
+As duas abordagens deverão receber os mesmos dados de origem, executar regras de
+transformação logicamente equivalentes e produzir exatamente o mesmo resultado
+final para cada dataset.
+
+A comparação não deverá ser prejudicada pela inclusão de etapas exclusivas em
+apenas uma das arquiteturas. Por isso, a complexidade da base será tratada como
+uma característica experimental do dataset, e não como exigência de que ENEM e
+TSE utilizem a mesma quantidade de camadas.
 
 ### ETL
 
@@ -97,6 +104,189 @@ Tabela final
 
 Os dados serão inicialmente carregados em seu estado bruto no PostgreSQL. As transformações serão executadas posteriormente no próprio banco, utilizando SQL.
 
+### ENEM — arquitetura simplificada
+
+Para a base ENEM, que representa o cenário de menor complexidade, será adotada
+uma arquitetura simplificada.
+
+Fluxo conceitual do ETL:
+
+```text
+Arquivos CSV
+    ↓
+Extração em Python
+    ↓
+Transformação em Python/Pandas
+    ↓
+Carga no PostgreSQL
+    ↓
+Tabelas finais
+```
+
+Fluxo conceitual do ELT:
+
+```text
+Arquivos CSV
+    ↓
+Extração
+    ↓
+Carga bruta no PostgreSQL
+    ↓
+Transformação em SQL
+    ↓
+Tabelas finais
+```
+
+No ELT do ENEM não será criada uma camada intermediária de `staging` apenas por
+convenção arquitetural, pois isso acrescentaria uma etapa de processamento sem
+equivalente necessário no ETL e poderia introduzir viés no benchmark.
+
+O ELT carregará inicialmente os dados em uma camada `raw` e, a partir dela,
+gerará diretamente as tabelas finais.
+
+As tabelas finais produzidas pelo ETL e pelo ELT deverão possuir exatamente o
+mesmo contrato definido para:
+
+- `enem_participantes`;
+- `enem_resultados`.
+
+As transformações realizadas no ETL em Python deverão possuir equivalentes em
+SQL no ELT, incluindo mapeamentos de categorias, tratamento de valores ausentes,
+conversões de tipos, criação de regiões, renomeação de campos, cálculo de
+`nota_media_objetivas` e criação de `presente_completo`.
+
+Conceitualmente:
+
+```text
+ETL ENEM
+
+CSV
+ ↓
+Python/Pandas
+ ↓
+FINAL
+```
+
+e:
+
+```text
+ELT ENEM
+
+CSV
+ ↓
+RAW PostgreSQL
+ ↓
+SQL
+ ↓
+FINAL
+```
+
+O objeto comparado será o resultado final, que deverá ser logicamente e
+estruturalmente equivalente entre as duas arquiteturas.
+
+### TSE — arquitetura em camadas
+
+Para a base TSE, que representa o cenário de maior complexidade, será adotada
+uma arquitetura em múltiplas camadas:
+
+```text
+raw
+ ↓
+staging
+ ↓
+processed
+```
+
+Essa estrutura segue um modelo semelhante à arquitetura medalhão, porém utiliza
+nomenclatura diretamente relacionada ao papel de cada camada.
+
+As responsabilidades serão:
+
+`raw`:
+armazenar os dados com mínima alteração em relação aos arquivos de origem.
+
+`staging`:
+realizar transformações intermediárias, como tipagem, padronização, tratamento
+de valores ausentes, decodificação de códigos, preparação de chaves,
+normalizações e outras operações necessárias antes da consolidação final.
+
+`processed`:
+representar o resultado final do pipeline, incluindo consolidações, joins,
+regras derivadas, agregações ou demais transformações necessárias ao dataset
+analítico final.
+
+A arquitetura em camadas do TSE deverá ser reproduzida logicamente tanto no ETL
+quanto no ELT.
+
+No ETL:
+
+```text
+Arquivos TSE
+    ↓
+Python
+    ↓
+Transformações equivalentes à camada staging
+    ↓
+Transformações equivalentes à camada processed
+    ↓
+Resultado final
+```
+
+No ELT:
+
+```text
+Arquivos TSE
+    ↓
+PostgreSQL RAW
+    ↓
+Transformações SQL
+    ↓
+STAGING
+    ↓
+Transformações SQL
+    ↓
+PROCESSED
+```
+
+O ETL não precisa obrigatoriamente persistir fisicamente cada camada
+intermediária no PostgreSQL, mas deve executar as mesmas etapas lógicas e regras
+utilizadas no ELT.
+
+O requisito fundamental permanece:
+
+```text
+ETL.processed = ELT.processed
+```
+
+A camada `processed` representa o resultado final utilizado para a comparação.
+
+Assim, os dois datasets terão papéis experimentais diferentes:
+
+```text
+ENEM
+menor complexidade
+poucas dependências entre transformações
+arquitetura raw → final
+
+TSE
+maior complexidade
+múltiplas transformações e dependências
+arquitetura raw → staging → processed
+```
+
+Isso permitirá avaliar não somente o comportamento de ETL e ELT diante do
+aumento do volume de dados, mas também diante do aumento da complexidade do
+processamento.
+
+Dentro de cada dataset, entretanto, ETL e ELT deverão executar transformações
+equivalentes e produzir o mesmo resultado final.
+
+Não será adicionada uma camada `analytics` ao benchmark principal. Caso sejam
+posteriormente construídas tabelas agregadas, dashboards ou visualizações, elas
+deverão ficar fora do tempo medido de ETL × ELT ou ser executadas igualmente a
+partir das saídas das duas arquiteturas. Dessa forma, não interferirão na
+comparação principal.
+
 ### Regra de equivalência
 
 Para cada combinação de base e volume, ETL e ELT deverão produzir a mesma estrutura final e os mesmos resultados.
@@ -104,9 +294,17 @@ Para cada combinação de base e volume, ETL e ELT deverão produzir a mesma est
 A equivalência será validada por meio de critérios como:
 
 - quantidade de registros;
-- estrutura das colunas;
-- tipos esperados;
-- validações dos valores resultantes.
+- nomes e ordem das colunas;
+- tipos;
+- valores;
+- regras derivadas;
+- valores nulos;
+- categorias;
+- comparação por hashes ou operações equivalentes;
+- verificação de diferenças entre os resultados.
+
+O objetivo é garantir que diferenças de tempo, CPU, RAM e throughput sejam
+atribuíveis à arquitetura do pipeline, e não a diferenças no resultado produzido.
 
 ---
 
@@ -508,6 +706,9 @@ para análise.
 ## 17. Pontos ainda a detalhar durante a implementação
 
 O desenho experimental principal está definido.
+
+A decisão de utilizar as camadas `raw`, `staging` e `processed` no TSE já está
+definida e não será tratada como uma pendência arquitetural.
 
 Permanecem como detalhes técnicos a serem fechados durante a exploração e implementação:
 
