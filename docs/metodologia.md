@@ -46,14 +46,82 @@ As bases alternativas definidas anteriormente não participarão inicialmente do
 
 ## 3. Volumes analisados
 
-Cada base será avaliada nos seguintes volumes:
+Cada base será avaliada nos seguintes volumes nominais:
 
-- 100.000 registros;
-- 500.000 registros;
-- 1.000.000 de registros;
-- 3.000.000 de registros.
+- 100.000;
+- 500.000;
+- 1.000.000;
+- 3.000.000.
 
-Para cada volume, ETL e ELT deverão utilizar exatamente o mesmo conjunto de registros.
+Esses valores representam o limite nominal utilizado no experimento. A
+interpretação exata desse limite poderá depender da estrutura do dataset e da
+quantidade de arquivos de origem envolvidos.
+
+No caso da base ENEM, o volume nominal será interpretado como a quantidade
+máxima de registros por arquivo de origem, e não como a quantidade total de
+registros somando todos os arquivos. Atualmente, a base ENEM utilizará dois
+arquivos principais:
+
+- `PARTICIPANTES_2024.csv`;
+- `RESULTADOS_2024.csv`.
+
+Assim, os cenários da base ENEM serão interpretados da seguinte forma:
+
+```text
+100k:
+até 100.000 linhas de participantes
++
+até 100.000 linhas de resultados
+
+500k:
+até 500.000 linhas de participantes
++
+até 500.000 linhas de resultados
+
+1M:
+até 1.000.000 de linhas de participantes
++
+até 1.000.000 de linhas de resultados
+
+3M:
+até 3.000.000 de linhas de participantes
++
+até 3.000.000 de linhas de resultados
+```
+
+Portanto:
+
+```text
+volume nominal ≠ necessariamente quantidade total de linhas processadas
+```
+
+A quantidade total efetivamente processada deverá ser registrada separadamente.
+Por exemplo:
+
+```text
+volume_por_arquivo = 500000
+
+linhas_participantes = 500000
+linhas_resultados = 500000
+
+quantidade_registros_total = 1000000
+```
+
+Para cada combinação de base e volume, ETL e ELT deverão utilizar exatamente o
+mesmo subconjunto de dados.
+
+No caso do ENEM, a seleção será determinística, usando as primeiras `N` linhas
+de cada arquivo de origem. Por exemplo, no cenário de 500k:
+
+```text
+ETL:
+primeiras 500.000 linhas de PARTICIPANTES_2024.csv
+primeiras 500.000 linhas de RESULTADOS_2024.csv
+
+ELT:
+primeiras 500.000 linhas de PARTICIPANTES_2024.csv
+primeiras 500.000 linhas de RESULTADOS_2024.csv
+```
 
 A variação de volume será utilizada para analisar como cada abordagem se comporta conforme cresce a quantidade de dados processados.
 
@@ -64,6 +132,17 @@ A variação de volume será utilizada para analisar como cada abordagem se comp
 As duas abordagens deverão receber os mesmos dados de origem, executar regras de
 transformação logicamente equivalentes e produzir exatamente o mesmo resultado
 final para cada dataset.
+
+Para cada combinação experimental, ETL e ELT deverão utilizar:
+
+- os mesmos arquivos;
+- o mesmo volume nominal;
+- as mesmas linhas;
+- as mesmas regras de transformação;
+- o mesmo contrato final.
+
+A única diferença desejada entre as execuções será a arquitetura utilizada para
+realizar as transformações.
 
 A comparação não deverá ser prejudicada pela inclusão de etapas exclusivas em
 apenas uma das arquiteturas. Por isso, a complexidade da base será tratada como
@@ -291,6 +370,12 @@ comparação principal.
 
 Para cada combinação de base e volume, ETL e ELT deverão produzir a mesma estrutura final e os mesmos resultados.
 
+A equivalência exige que as duas abordagens utilizem os mesmos arquivos, o mesmo
+volume nominal, as mesmas linhas, as mesmas regras de transformação e o mesmo
+contrato final. A única diferença desejada será a arquitetura de processamento:
+transformação antes da carga, no ETL, ou transformação após a carga bruta, no
+ELT.
+
 A equivalência será validada por meio de critérios como:
 
 - quantidade de registros;
@@ -432,11 +517,32 @@ A utilização dessa mesma estratégia nos diferentes pipelines, juntamente com 
 
 ## 10. Organização das execuções
 
-Os testes serão divididos em cinco rodadas válidas.
+Os testes serão divididos em uma execução de aquecimento e cinco rodadas
+válidas.
+
+A execução de aquecimento utilizará o mesmo subconjunto de dados definido para o
+cenário correspondente, mas não participará das estatísticas finais.
 
 Em cada rodada, todos os cenários previstos serão executados uma vez.
 
-A ordem dos cenários será randomizada em cada rodada.
+A ordem dos cenários será randomizada em cada rodada. Essa randomização se
+aplicará somente à ordem das execuções, nunca aos dados pertencentes a cada
+cenário.
+
+```text
+ordem das execuções = randomizada
+dados de cada cenário = fixos
+```
+
+Os subconjuntos de dados permanecerão fixos durante todo o experimento. Assim,
+as mesmas linhas deverão ser utilizadas:
+
+- no ETL;
+- no ELT;
+- na execução de aquecimento;
+- em todas as cinco rodadas válidas.
+
+Não haverá nova amostragem ou sorteio de registros entre rodadas.
 
 Exemplo conceitual:
 
@@ -460,6 +566,12 @@ Nova ordem randomizada.
 A randomização será reproduzível por meio de uma seed definida no código.
 
 Isso evita executar todos os testes ETL primeiro e todos os testes ELT posteriormente, reduzindo possíveis vieses temporais.
+
+Na nomenclatura dos cenários, poderá continuar sendo utilizada a forma resumida,
+como `ENEM | 500k | ETL` e `ENEM | 500k | ELT`. Para a base ENEM, entretanto,
+`500k` significa limite de 500 mil linhas por arquivo de origem. Quando for
+necessário evitar ambiguidade, poderá ser usada a forma mais explícita
+`ENEM | 500k por arquivo | ETL`.
 
 ---
 
@@ -523,8 +635,11 @@ Serão mantidos equivalentes sempre que possível:
 
 - máquina utilizada;
 - dados de origem;
-- registros utilizados em cada volume;
-- resultado final esperado;
+- arquivos utilizados em cada base;
+- volume nominal;
+- linhas utilizadas em cada volume;
+- regras de transformação;
+- contrato final esperado;
 - ferramenta de carga;
 - banco de dados;
 - número de repetições;
@@ -573,11 +688,13 @@ Cada execução deverá gerar automaticamente um registro estruturado contendo, 
 
 ```text
 dataset
-volume
+volume_nominal
 arquitetura
 rodada
+aquecimento
 tempo_leitura
 tempo_transformacao
+tempo_validacao
 tempo_carga
 tempo_total
 throughput
@@ -585,7 +702,33 @@ cpu_media
 cpu_pico
 ram_media
 ram_pico
-quantidade_registros
+quantidade_registros_total
+timestamp
+```
+
+Quando aplicável, o campo genérico de volume deverá ser complementado ou
+substituído por campos mais específicos. Para a base ENEM, deverão ser
+registrados pelo menos:
+
+```text
+dataset
+volume_por_arquivo
+linhas_participantes
+linhas_resultados
+quantidade_registros_total
+arquitetura
+rodada
+aquecimento
+tempo_leitura
+tempo_transformacao
+tempo_validacao
+tempo_carga
+tempo_total
+throughput
+cpu_media
+cpu_pico
+ram_media
+ram_pico
 timestamp
 ```
 
