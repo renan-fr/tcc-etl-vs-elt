@@ -142,6 +142,8 @@
 - O primeiro esqueleto cria tabelas RAW com as colunas originais do CSV em
   `TEXT`, carrega os arquivos por `COPY`, cria tabelas finais por SQL e mede
   carga RAW, transformacao, validacao e tempo total.
+- O parametro `--limite` foi implementado com a mesma semantica do ETL: limita
+  as linhas de cada arquivo, preservando a ordem; `0` carrega todos os registros.
 - A implementacao ainda e uma primeira etapa: permanecem a validacao completa,
   o suporte efetivo aos volumes de benchmark, a coleta de CPU/RAM e a
   comparacao automatica entre ETL e ELT.

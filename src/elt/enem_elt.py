@@ -7,6 +7,7 @@ from datetime import datetime
 from io import TextIOWrapper
 import os
 from pathlib import Path
+import tempfile
 import time
 
 import psycopg2
@@ -82,9 +83,37 @@ def criar_tabela_raw(cursor, schema: str, tabela: str, colunas: list[str]) -> No
     )
 
 
-def carregar_csv_raw(cursor, caminho: Path, schema: str, tabela: str) -> int:
+def carregar_csv_raw(
+    cursor,
+    caminho: Path,
+    schema: str,
+    tabela: str,
+    limite: int | None = None,
+) -> int:
+    if limite is not None and limite < 0:
+        raise ValueError("limite deve ser maior ou igual a zero.")
+
     colunas = ler_cabecalho(caminho)
-    with caminho.open("r", encoding="latin-1", newline="") as arquivo:
+    if limite is None:
+        arquivo = caminho.open("r", encoding="latin-1", newline="")
+        arquivo_temporario = None
+    else:
+        arquivo_temporario = tempfile.NamedTemporaryFile(
+            mode="w+", encoding="utf-8", newline="", suffix=".csv"
+        )
+        escritor = csv.writer(arquivo_temporario, delimiter=";", lineterminator="\n")
+        with caminho.open("r", encoding="latin-1", newline="") as origem:
+            leitor = csv.reader(origem, delimiter=";")
+            escritor.writerow(next(leitor))
+            for numero, linha in enumerate(leitor):
+                if numero >= limite:
+                    break
+                escritor.writerow(linha)
+        arquivo_temporario.flush()
+        arquivo_temporario.seek(0)
+        arquivo = arquivo_temporario
+
+    try:
         cursor.copy_expert(
             sql.SQL("COPY {}.{} ({}) FROM STDIN WITH (FORMAT CSV, HEADER TRUE, DELIMITER ';', NULL '')").format(
                 sql.Identifier(schema),
@@ -93,6 +122,11 @@ def carregar_csv_raw(cursor, caminho: Path, schema: str, tabela: str) -> int:
             ).as_string(cursor),
             arquivo,
         )
+    finally:
+        arquivo.close()
+        if arquivo_temporario is not None:
+            arquivo_temporario.close()
+
     cursor.execute(
         sql.SQL("SELECT COUNT(*) FROM {}.{};").format(
             sql.Identifier(schema), sql.Identifier(tabela)
@@ -191,8 +225,14 @@ def executar_elt(database_url: str | None, limite: int | None) -> TemposELT:
             inicio = time.perf_counter()
             criar_tabela_raw(cursor, SCHEMA_RAW, TABELA_RAW_PARTICIPANTES, ler_cabecalho(CAMINHO_PARTICIPANTES))
             criar_tabela_raw(cursor, SCHEMA_RAW, TABELA_RAW_RESULTADOS, ler_cabecalho(CAMINHO_RESULTADOS))
-            carregar_csv_raw(cursor, CAMINHO_PARTICIPANTES, SCHEMA_RAW, TABELA_RAW_PARTICIPANTES)
-            carregar_csv_raw(cursor, CAMINHO_RESULTADOS, SCHEMA_RAW, TABELA_RAW_RESULTADOS)
+            carregar_csv_raw(
+                cursor, CAMINHO_PARTICIPANTES, SCHEMA_RAW,
+                TABELA_RAW_PARTICIPANTES, limite,
+            )
+            carregar_csv_raw(
+                cursor, CAMINHO_RESULTADOS, SCHEMA_RAW,
+                TABELA_RAW_RESULTADOS, limite,
+            )
             conexao.commit()
             tempo_raw = time.perf_counter() - inicio
 
@@ -215,7 +255,12 @@ def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(description="Esboço do pipeline ELT do ENEM 2024")
     parser.add_argument("--database-url", default=os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL"))
-    parser.add_argument("--limite", type=int, default=0, help="Reservado para a implementação do recorte experimental.")
+    parser.add_argument(
+        "--limite",
+        type=int,
+        default=0,
+        help="Quantidade máxima de linhas lidas de cada arquivo; use 0 para todas.",
+    )
     args = parser.parse_args()
     tempos = executar_elt(args.database_url, None if args.limite == 0 else args.limite)
     print(f"Carga RAW: {tempos.carga_raw:.3f}s")
