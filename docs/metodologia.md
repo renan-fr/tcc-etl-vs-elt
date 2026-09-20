@@ -740,6 +740,10 @@ Esses registros serão armazenados de forma estruturada para posterior análise 
 
 ## 16. Contrato final da base ENEM
 
+O ELT devera reproduzir exatamente este mesmo contrato final. A camada RAW do
+ELT preservara os campos originais, e as transformacoes SQL deverao gerar as
+mesmas tabelas finais, colunas, tipos, nulos e valores do ETL.
+
 A base ENEM produzirá duas tabelas finais independentes. Não haverá `JOIN` entre
 elas, nem relacionamento por chave estrangeira. Cada tabela alimentará gráficos
 com objetivos diferentes.
