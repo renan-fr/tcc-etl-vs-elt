@@ -147,6 +147,13 @@
 - A implementacao ainda e uma primeira etapa: permanecem a validacao completa,
   o suporte efetivo aos volumes de benchmark, a coleta de CPU/RAM e a
   comparacao automatica entre ETL e ELT.
+- A tentativa de iniciar os testes em 21/09/2026 foi bloqueada porque o Python
+  do `.venv` nao esta disponivel; o ambiente aponta para um executavel removido.
+- O PostgreSQL 18 esta instalado e disponivel (`psql`, `postgres` e `pg_ctl`),
+  mas os testes Python dependem primeiro da recuperacao do interpretador.
+- A primeira comparacao identificou divergencias somente em
+  `nota_media_objetivas`; o ELT foi ajustado para reproduzir o arredondamento
+  half-even usado pelo `pandas.round(2)` no ETL.
 
 ## Roteiro imediato do ELT
 

@@ -210,10 +210,36 @@ def transformar_resultados_sql(cursor, schema_raw: str, schema_final: str) -> No
              WHEN "SG_UF_ESC" IN ('DF','GO','MT','MS') THEN 'Centro-Oeste'
              WHEN "SG_UF_ESC" IN ('ES','MG','RJ','SP') THEN 'Sudeste'
              WHEN "SG_UF_ESC" IN ('PR','RS','SC') THEN 'Sul' ELSE 'Não informado' END AS regiao_escola,
-        CASE WHEN NULLIF("NU_NOTA_CN", '') IS NOT NULL AND NULLIF("NU_NOTA_CH", '') IS NOT NULL AND NULLIF("NU_NOTA_LC", '') IS NOT NULL AND NULLIF("NU_NOTA_MT", '') IS NOT NULL
-             THEN ROUND((NULLIF("NU_NOTA_CN", '')::numeric + NULLIF("NU_NOTA_CH", '')::numeric + NULLIF("NU_NOTA_LC", '')::numeric + NULLIF("NU_NOTA_MT", '')::numeric) / 4, 2) END AS nota_media_objetivas,
+        CASE WHEN media_objetiva_bruta IS NULL THEN NULL ELSE
+             (
+                 CASE
+                     WHEN media_objetiva_bruta * 100 - TRUNC(media_objetiva_bruta * 100) < 0.5
+                         THEN TRUNC(media_objetiva_bruta * 100)
+                     WHEN media_objetiva_bruta * 100 - TRUNC(media_objetiva_bruta * 100) > 0.5
+                         THEN TRUNC(media_objetiva_bruta * 100) + 1
+                     WHEN MOD(TRUNC(media_objetiva_bruta * 100), 2) = 0
+                         THEN TRUNC(media_objetiva_bruta * 100)
+                     ELSE TRUNC(media_objetiva_bruta * 100) + 1
+                 END
+             ) / 100
+        END AS nota_media_objetivas,
         ("TP_PRESENCA_CN" = '1' AND "TP_PRESENCA_CH" = '1' AND "TP_PRESENCA_LC" = '1' AND "TP_PRESENCA_MT" = '1' AND "TP_STATUS_REDACAO" IS NOT NULL) AS presente_completo
-    FROM {raw};
+    FROM (
+        SELECT r.*,
+               CASE
+                   WHEN NULLIF("NU_NOTA_CN", '') IS NOT NULL
+                    AND NULLIF("NU_NOTA_CH", '') IS NOT NULL
+                    AND NULLIF("NU_NOTA_LC", '') IS NOT NULL
+                    AND NULLIF("NU_NOTA_MT", '') IS NOT NULL
+                   THEN (
+                       NULLIF("NU_NOTA_CN", '')::numeric
+                       + NULLIF("NU_NOTA_CH", '')::numeric
+                       + NULLIF("NU_NOTA_LC", '')::numeric
+                       + NULLIF("NU_NOTA_MT", '')::numeric
+                   ) / 4
+               END AS media_objetiva_bruta
+        FROM {raw} r
+    ) origem;
     """
     cursor.execute(sql_texto)
 
