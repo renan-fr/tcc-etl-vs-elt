@@ -187,8 +187,6 @@
   possui a interface nem as metricas completas do benchmark.
 - `src/benchmark.py` continua vazio; a orquestracao, a comparacao ETL x ELT e a
   analise dos resultados ainda nao foram implementadas.
-- A execucao esta bloqueada no ambiente atual porque os interpretadores Python
-  global e do `.venv` nao iniciam. O PostgreSQL 18 esta instalado.
 - A base TSE esta presente em `data/raw`, mas ainda nao existe pipeline TSE em
   `src/`; ela deve ficar para depois da validacao completa do ENEM.
 - Proxima sequencia recomendada: recuperar o ambiente Python, completar o ELT,
@@ -208,3 +206,17 @@
   completo continua ocorrendo durante o `COPY`, por isso essa definicao deve
   ser mantida igual em todos os cenarios.
 - As validacoes SQL ainda estao limitadas a contagem de linhas.
+
+## Primeiro piloto ETL x ELT
+
+- Executado piloto com 1.000 registros por arquivo, usando schemas separados
+  para ETL, RAW e ELT.
+- As quantidades de registros foram equivalentes nas duas tabelas finais.
+- Foi criado `src/comparar_equivalencia.py` para verificar contagens e
+  diferencas registro a registro com `EXCEPT ALL`.
+- A primeira comparacao encontrou 54 divergencias em `nota_media_objetivas`.
+- A causa foi a diferenca entre o arredondamento sobre `float` no pandas e o
+  calculo exato em `numeric` no PostgreSQL; a formula SQL foi ajustada para
+  preservar a semantica do ETL.
+- O piloto foi repetido e terminou com equivalencia total nas tabelas
+  `enem_participantes` e `enem_resultados`.

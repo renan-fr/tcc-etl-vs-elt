@@ -332,17 +332,17 @@ def transformar_resultados_sql(cursor, schema_raw: str, schema_final: str) -> No
         CASE WHEN media_objetiva_bruta IS NULL THEN NULL ELSE
              (
                  CASE
-                     WHEN media_objetiva_bruta * 100 - TRUNC(media_objetiva_bruta * 100) < 0.5
-                         THEN TRUNC(media_objetiva_bruta * 100)
-                     WHEN media_objetiva_bruta * 100 - TRUNC(media_objetiva_bruta * 100) > 0.5
-                         THEN TRUNC(media_objetiva_bruta * 100) + 1
-                     WHEN MOD(TRUNC(media_objetiva_bruta * 100), 2) = 0
-                         THEN TRUNC(media_objetiva_bruta * 100)
-                     ELSE TRUNC(media_objetiva_bruta * 100) + 1
+                     WHEN media_objetiva_bruta * 100 - FLOOR(media_objetiva_bruta * 100) < 0.5
+                         THEN FLOOR(media_objetiva_bruta * 100)
+                     WHEN media_objetiva_bruta * 100 - FLOOR(media_objetiva_bruta * 100) > 0.5
+                         THEN FLOOR(media_objetiva_bruta * 100) + 1
+                     WHEN FLOOR(media_objetiva_bruta * 100) - FLOOR(FLOOR(media_objetiva_bruta * 100) / 2) * 2 = 0
+                         THEN FLOOR(media_objetiva_bruta * 100)
+                     ELSE FLOOR(media_objetiva_bruta * 100) + 1
                  END
              ) / 100
-        END AS nota_media_objetivas,
-        ("TP_PRESENCA_CN" = '1' AND "TP_PRESENCA_CH" = '1' AND "TP_PRESENCA_LC" = '1' AND "TP_PRESENCA_MT" = '1' AND "TP_STATUS_REDACAO" IS NOT NULL) AS presente_completo
+        END::numeric AS nota_media_objetivas,
+        COALESCE(("TP_PRESENCA_CN" = '1' AND "TP_PRESENCA_CH" = '1' AND "TP_PRESENCA_LC" = '1' AND "TP_PRESENCA_MT" = '1' AND "TP_STATUS_REDACAO" IS NOT NULL), FALSE) AS presente_completo
     FROM (
         SELECT r.*,
                CASE
@@ -351,10 +351,10 @@ def transformar_resultados_sql(cursor, schema_raw: str, schema_final: str) -> No
                     AND NULLIF("NU_NOTA_LC", '') IS NOT NULL
                     AND NULLIF("NU_NOTA_MT", '') IS NOT NULL
                    THEN (
-                       NULLIF("NU_NOTA_CN", '')::numeric
-                       + NULLIF("NU_NOTA_CH", '')::numeric
-                       + NULLIF("NU_NOTA_LC", '')::numeric
-                       + NULLIF("NU_NOTA_MT", '')::numeric
+                       NULLIF("NU_NOTA_CN", '')::double precision
+                       + NULLIF("NU_NOTA_CH", '')::double precision
+                       + NULLIF("NU_NOTA_LC", '')::double precision
+                       + NULLIF("NU_NOTA_MT", '')::double precision
                    ) / 4
                END AS media_objetiva_bruta
         FROM {raw} r
