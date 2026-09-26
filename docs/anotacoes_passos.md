@@ -237,3 +237,13 @@
   numericas para duas casas, mantendo a leitura adequada para analise.
 - Arquivos gerados antigos de pilotos e execucoes anteriores foram removidos;
   os resultados podem ser recriados pelos comandos documentados no README.
+
+## Orquestrador rudimentar do benchmark
+
+- `src/benchmark.py` foi implementado para executar, por volume, um
+  aquecimento e a quantidade configurada de rodadas ETL e ELT.
+- O script recebe volumes, quantidade de rodadas, diretorio de resultados e
+  executavel Python por parametros.
+- A primeira versao nao compara resultados nem produz analise; apenas chama os
+  pipelines e acumula os CSVs e resumos.
+- O teste tecnico com um volume e uma rodada foi concluido com sucesso.

@@ -91,7 +91,28 @@ equivalencia=OK
 Se houver divergência, o cenário não deve ser usado na análise de desempenho
 até que a causa seja corrigida.
 
-## 5. Arquivos de resultados
+## 5. Automatizar aquecimentos e rodadas
+
+O `src/benchmark.py` executa automaticamente um aquecimento e as rodadas
+válidas para cada volume. Ele não compara resultados nem gera análises.
+
+Para executar o protocolo completo:
+
+```powershell
+.venv\Scripts\python.exe src\benchmark.py --rodadas 5
+```
+
+Para testar apenas um volume com uma rodada:
+
+```powershell
+.venv\Scripts\python.exe src\benchmark.py --volumes 100000 --rodadas 1
+```
+
+Os arquivos são acumulados em `data/benchmark/resultados/`. Por padrão, a
+execução completa realiza 48 chamadas aos pipelines: 4 volumes × 6 execuções
+(1 aquecimento + 5 rodadas) × 2 arquiteturas.
+
+## 6. Arquivos de resultados
 
 - `data/benchmark/resultados/enem_etl.csv`: métricas do ETL;
 - `data/benchmark/resultados/enem_elt.csv`: métricas do ELT;
@@ -101,5 +122,5 @@ Os CSVs têm tempos com três casas decimais e as demais métricas numéricas co
 duas casas, sendo os arquivos principais para a análise dos tempos, throughput,
 CPU, RAM e quantidade de registros.
 
-As execuções oficiais ainda são manuais. O arquivo `src/benchmark.py` será
-implementado posteriormente como orquestrador automático.
+O `src/benchmark.py` automatiza somente a execução. A comparação de equivalência
+continua sendo executada separadamente com `src/comparar_equivalencia.py`.
