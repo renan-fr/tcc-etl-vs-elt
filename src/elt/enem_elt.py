@@ -412,11 +412,18 @@ def salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
     caminho.parent.mkdir(parents=True, exist_ok=True)
     campos = list(resultado.__dataclass_fields__)
     existe = caminho.exists()
+    linha = {}
+    for campo in campos:
+        valor = getattr(resultado, campo)
+        if isinstance(valor, float):
+            casas = 3 if campo.startswith("tempo_") else 2
+            valor = round(valor, casas)
+        linha[campo] = valor
     with caminho.open("a", newline="", encoding="utf-8") as arquivo:
         escritor = csv.DictWriter(arquivo, fieldnames=campos)
         if not existe:
             escritor.writeheader()
-        escritor.writerow({campo: getattr(resultado, campo) for campo in campos})
+        escritor.writerow(linha)
 
 
 def finalizar_benchmark(monitor, inicio_total, tempos, limite, rodada, aquecimento, caminho_csv, caminho_resumo) -> None:
@@ -447,8 +454,8 @@ def main() -> None:
     parser.add_argument("--schema-raw", default=os.getenv("POSTGRES_SCHEMA_RAW", SCHEMA_RAW))
     parser.add_argument("--schema-final", default=os.getenv("POSTGRES_SCHEMA_ELT", SCHEMA_FINAL))
     parser.add_argument("--benchmark", action="store_true")
-    parser.add_argument("--benchmark-output", type=Path, default=BASE_DIR / "data" / "benchmark" / "enem_elt_resultados.csv")
-    parser.add_argument("--benchmark-summary-output", type=Path, default=BASE_DIR / "data" / "benchmark" / "enem_elt_resumo.txt")
+    parser.add_argument("--benchmark-output", type=Path, default=BASE_DIR / "data" / "benchmark" / "resultados" / "enem_elt.csv")
+    parser.add_argument("--benchmark-summary-output", type=Path, default=BASE_DIR / "data" / "benchmark" / "resumos" / "enem_elt.txt")
     parser.add_argument("--rodada", type=int, default=None)
     parser.add_argument("--aquecimento", action="store_true")
     parser.add_argument(

@@ -1104,7 +1104,13 @@ def _salvar_resultado_benchmark(
     caminho: Path,
 ) -> None:
     caminho.parent.mkdir(parents=True, exist_ok=True)
-    linha = pd.DataFrame([resultado.__dict__])
+    linha_formatada = {}
+    for campo, valor in resultado.__dict__.items():
+        if isinstance(valor, float):
+            casas = 3 if campo.startswith("tempo_") else 2
+            valor = round(valor, casas)
+        linha_formatada[campo] = valor
+    linha = pd.DataFrame([linha_formatada])
     linha.to_csv(
         caminho,
         mode="a",
@@ -1383,14 +1389,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--benchmark-output",
         type=Path,
-        default=BASE_DIR / "data" / "benchmark" / "enem_etl_resultados.csv",
+        default=BASE_DIR / "data" / "benchmark" / "resultados" / "enem_etl.csv",
         help="Arquivo CSV de saida das metricas do benchmark.",
     )
 
     parser.add_argument(
         "--benchmark-summary-output",
         type=Path,
-        default=BASE_DIR / "data" / "benchmark" / "enem_etl_resumo.txt",
+        default=BASE_DIR / "data" / "benchmark" / "resumos" / "enem_etl.txt",
         help="Arquivo TXT de saida do resumo do benchmark.",
     )
 

@@ -220,3 +220,20 @@
   preservar a semantica do ETL.
 - O piloto foi repetido e terminou com equivalencia total nas tabelas
   `enem_participantes` e `enem_resultados`.
+
+## Preparacao para execucao manual dos benchmarks
+
+- O `README.md` foi simplificado para documentar somente preparacao, execucao
+  manual do ETL/ELT, aquecimento, cinco rodadas, comparacao de equivalencia e
+  local dos CSVs de metricas.
+- As interfaces de linha de comando dos dois pipelines foram verificadas com
+  `--help` e estao prontas para os benchmarks manuais.
+
+## Organizacao dos resultados de benchmark
+
+- Os resultados foram padronizados em `data/benchmark/resultados/` e os
+  resumos em `data/benchmark/resumos/`.
+- Os CSVs passaram a arredondar tempos para tres casas e demais metricas
+  numericas para duas casas, mantendo a leitura adequada para analise.
+- Arquivos gerados antigos de pilotos e execucoes anteriores foram removidos;
+  os resultados podem ser recriados pelos comandos documentados no README.
