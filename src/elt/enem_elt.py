@@ -8,9 +8,11 @@ from io import TextIOWrapper
 import os
 from pathlib import Path
 import tempfile
+import threading
 import time
 
 import psycopg2
+import psutil
 from psycopg2 import sql
 from dotenv import load_dotenv
 
@@ -43,10 +45,123 @@ COLUNAS_RESULTADOS = [
 
 @dataclass(frozen=True)
 class TemposELT:
+    leitura: float
     carga_raw: float
     transformacao_sql: float
     validacao: float
     total: float
+    linhas_participantes: int
+    linhas_resultados: int
+
+
+@dataclass(frozen=True)
+class ResultadoBenchmark:
+    dataset: str
+    volume_configurado: int | None
+    arquitetura: str
+    rodada: int | None
+    aquecimento: bool
+    tempo_leitura: float
+    tempo_transformacao: float
+    tempo_validacao: float
+    tempo_carga: float
+    tempo_total: float
+    throughput: float
+    cpu_media_python: float
+    cpu_pico_python: float
+    ram_media_python_mb: float
+    ram_pico_python_mb: float
+    cpu_media_postgres: float
+    cpu_pico_postgres: float
+    ram_media_postgres_mb: float
+    ram_pico_postgres_mb: float
+    cpu_media_total: float
+    cpu_pico_total: float
+    ram_media_total_mb: float
+    ram_pico_total_mb: float
+    quantidade_registros: int
+    linhas_participantes: int
+    linhas_resultados: int
+    timestamp: str
+
+
+class MonitorRecursos:
+    def __init__(self, intervalo_segundos: float = 0.5) -> None:
+        self._processo_python = psutil.Process()
+        self._intervalo = intervalo_segundos
+        self._parar = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._amostras: list[dict[str, float]] = []
+
+    def iniciar(self) -> None:
+        self._parar.clear()
+        self._processo_python.cpu_percent(interval=None)
+        self._thread = threading.Thread(target=self._coletar, daemon=True)
+        self._thread.start()
+
+    def parar(self) -> dict[str, float]:
+        self._parar.set()
+        if self._thread:
+            self._thread.join()
+        self._registrar_amostra()
+        chaves = ("cpu_python", "ram_python", "cpu_postgres", "ram_postgres", "cpu_total", "ram_total")
+        if not self._amostras:
+            valores = {chave: [0.0] for chave in chaves}
+        else:
+            valores = {chave: [amostra[chave] for amostra in self._amostras] for chave in chaves}
+        return {
+            "cpu_media_python": sum(valores["cpu_python"]) / len(valores["cpu_python"]),
+            "cpu_pico_python": max(valores["cpu_python"]),
+            "ram_media_python_mb": sum(valores["ram_python"]) / len(valores["ram_python"]) / (1024 * 1024),
+            "ram_pico_python_mb": max(valores["ram_python"]) / (1024 * 1024),
+            "cpu_media_postgres": sum(valores["cpu_postgres"]) / len(valores["cpu_postgres"]),
+            "cpu_pico_postgres": max(valores["cpu_postgres"]),
+            "ram_media_postgres_mb": sum(valores["ram_postgres"]) / len(valores["ram_postgres"]) / (1024 * 1024),
+            "ram_pico_postgres_mb": max(valores["ram_postgres"]) / (1024 * 1024),
+            "cpu_media_total": sum(valores["cpu_total"]) / len(valores["cpu_total"]),
+            "cpu_pico_total": max(valores["cpu_total"]),
+            "ram_media_total_mb": sum(valores["ram_total"]) / len(valores["ram_total"]) / (1024 * 1024),
+            "ram_pico_total_mb": max(valores["ram_total"]) / (1024 * 1024),
+        }
+
+    def _coletar(self) -> None:
+        while not self._parar.wait(self._intervalo):
+            self._registrar_amostra()
+
+    def _registrar_amostra(self) -> None:
+        processos = []
+        for processo in psutil.process_iter(["name"]):
+            try:
+                if "postgres" in (processo.info["name"] or "").lower():
+                    processos.append(processo)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        cpu_python = _cpu(self._processo_python)
+        ram_python = _ram(self._processo_python)
+        cpu_postgres = sum(_cpu(processo) for processo in processos)
+        ram_postgres = sum(_ram(processo) for processo in processos)
+        self._amostras.append({
+            "cpu_python": cpu_python,
+            "ram_python": float(ram_python),
+            "cpu_postgres": cpu_postgres,
+            "ram_postgres": float(ram_postgres),
+            "cpu_total": cpu_python + cpu_postgres,
+            "ram_total": float(ram_python + ram_postgres),
+        })
+
+
+def _cpu(processo: psutil.Process) -> float:
+    try:
+        return processo.cpu_percent(interval=None)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return 0.0
+
+
+def _ram(processo: psutil.Process) -> int:
+    try:
+        return processo.memory_info().rss
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return 0
 
 
 def obter_conexao(database_url: str | None = None):
@@ -89,10 +204,11 @@ def carregar_csv_raw(
     schema: str,
     tabela: str,
     limite: int | None = None,
-) -> int:
+) -> tuple[int, float, float]:
     if limite is not None and limite < 0:
         raise ValueError("limite deve ser maior ou igual a zero.")
 
+    inicio_leitura = time.perf_counter()
     colunas = ler_cabecalho(caminho)
     if limite is None:
         arquivo = caminho.open("r", encoding="latin-1", newline="")
@@ -112,7 +228,9 @@ def carregar_csv_raw(
         arquivo_temporario.flush()
         arquivo_temporario.seek(0)
         arquivo = arquivo_temporario
+    tempo_leitura = time.perf_counter() - inicio_leitura
 
+    inicio_carga = time.perf_counter()
     try:
         cursor.copy_expert(
             sql.SQL("COPY {}.{} ({}) FROM STDIN WITH (FORMAT CSV, HEADER TRUE, DELIMITER ';', NULL '')").format(
@@ -132,7 +250,8 @@ def carregar_csv_raw(
             sql.Identifier(schema), sql.Identifier(tabela)
         )
     )
-    return int(cursor.fetchone()[0])
+    quantidade = int(cursor.fetchone()[0])
+    return quantidade, tempo_leitura, time.perf_counter() - inicio_carga
 
 
 def _case(coluna: str, mapa: dict[str, str], desconhecido: str = "Não informado") -> str:
@@ -244,43 +363,94 @@ def transformar_resultados_sql(cursor, schema_raw: str, schema_final: str) -> No
     cursor.execute(sql_texto)
 
 
-def executar_elt(database_url: str | None, limite: int | None) -> TemposELT:
+def executar_elt(
+    database_url: str | None,
+    limite: int | None,
+    schema_raw: str = SCHEMA_RAW,
+    schema_final: str = SCHEMA_FINAL,
+) -> TemposELT:
     inicio_total = time.perf_counter()
     with obter_conexao(database_url) as conexao:
         with conexao.cursor() as cursor:
+            inicio_carga_raw = time.perf_counter()
             inicio = time.perf_counter()
-            criar_tabela_raw(cursor, SCHEMA_RAW, TABELA_RAW_PARTICIPANTES, ler_cabecalho(CAMINHO_PARTICIPANTES))
-            criar_tabela_raw(cursor, SCHEMA_RAW, TABELA_RAW_RESULTADOS, ler_cabecalho(CAMINHO_RESULTADOS))
-            carregar_csv_raw(
-                cursor, CAMINHO_PARTICIPANTES, SCHEMA_RAW,
+            criar_tabela_raw(cursor, schema_raw, TABELA_RAW_PARTICIPANTES, ler_cabecalho(CAMINHO_PARTICIPANTES))
+            criar_tabela_raw(cursor, schema_raw, TABELA_RAW_RESULTADOS, ler_cabecalho(CAMINHO_RESULTADOS))
+            _, leitura_participantes, _ = carregar_csv_raw(
+                cursor, CAMINHO_PARTICIPANTES, schema_raw,
                 TABELA_RAW_PARTICIPANTES, limite,
             )
-            carregar_csv_raw(
-                cursor, CAMINHO_RESULTADOS, SCHEMA_RAW,
+            _, leitura_resultados, _ = carregar_csv_raw(
+                cursor, CAMINHO_RESULTADOS, schema_raw,
                 TABELA_RAW_RESULTADOS, limite,
             )
             conexao.commit()
-            tempo_raw = time.perf_counter() - inicio
+            tempo_leitura = leitura_participantes + leitura_resultados
+            tempo_raw = time.perf_counter() - inicio_carga_raw
 
             inicio = time.perf_counter()
-            transformar_participantes_sql(cursor, SCHEMA_RAW, SCHEMA_FINAL)
-            transformar_resultados_sql(cursor, SCHEMA_RAW, SCHEMA_FINAL)
+            transformar_participantes_sql(cursor, schema_raw, schema_final)
+            transformar_resultados_sql(cursor, schema_raw, schema_final)
             conexao.commit()
             tempo_sql = time.perf_counter() - inicio
 
             inicio = time.perf_counter()
-            cursor.execute(f'SELECT COUNT(*) FROM "{SCHEMA_FINAL}"."{TABELA_FINAL_PARTICIPANTES}"')
-            cursor.execute(f'SELECT COUNT(*) FROM "{SCHEMA_FINAL}"."{TABELA_FINAL_RESULTADOS}"')
+            cursor.execute(f'SELECT COUNT(*) FROM "{schema_final}"."{TABELA_FINAL_PARTICIPANTES}"')
+            linhas_participantes = int(cursor.fetchone()[0])
+            cursor.execute(f'SELECT COUNT(*) FROM "{schema_final}"."{TABELA_FINAL_RESULTADOS}"')
+            linhas_resultados = int(cursor.fetchone()[0])
             conexao.commit()
             tempo_validacao = time.perf_counter() - inicio
 
-    return TemposELT(tempo_raw, tempo_sql, tempo_validacao, time.perf_counter() - inicio_total)
+    return TemposELT(
+        tempo_leitura, tempo_raw, tempo_sql, tempo_validacao, time.perf_counter() - inicio_total,
+        linhas_participantes, linhas_resultados,
+    )
+
+
+def salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    campos = list(resultado.__dataclass_fields__)
+    existe = caminho.exists()
+    with caminho.open("a", newline="", encoding="utf-8") as arquivo:
+        escritor = csv.DictWriter(arquivo, fieldnames=campos)
+        if not existe:
+            escritor.writeheader()
+        escritor.writerow({campo: getattr(resultado, campo) for campo in campos})
+
+
+def finalizar_benchmark(monitor, inicio_total, tempos, limite, rodada, aquecimento, caminho_csv, caminho_resumo) -> None:
+    recursos = monitor.parar()
+    quantidade = tempos.linhas_participantes + tempos.linhas_resultados
+    tempo_total = time.perf_counter() - inicio_total
+    resultado = ResultadoBenchmark(
+        dataset="enem", volume_configurado=limite, arquitetura="elt",
+        rodada=rodada, aquecimento=aquecimento, tempo_leitura=tempos.leitura,
+        tempo_transformacao=tempos.transformacao_sql, tempo_validacao=tempos.validacao,
+        tempo_carga=tempos.carga_raw, tempo_total=tempo_total,
+        throughput=quantidade / tempo_total if tempo_total else 0.0,
+        quantidade_registros=quantidade, linhas_participantes=tempos.linhas_participantes,
+        linhas_resultados=tempos.linhas_resultados,
+        timestamp=datetime.now().isoformat(timespec="seconds"), **recursos,
+    )
+    salvar_benchmark(resultado, caminho_csv)
+    caminho_resumo.parent.mkdir(parents=True, exist_ok=True)
+    with caminho_resumo.open("a", encoding="utf-8") as arquivo:
+        arquivo.write(f"Benchmark ELT ENEM | volume={limite or 'todos'} | total={tempo_total:.3f}s | registros={quantidade} | throughput={resultado.throughput:.2f}\n")
+    print(f"Resultado do benchmark salvo em: {caminho_csv}")
 
 
 def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(description="Esboço do pipeline ELT do ENEM 2024")
     parser.add_argument("--database-url", default=os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL"))
+    parser.add_argument("--schema-raw", default=os.getenv("POSTGRES_SCHEMA_RAW", SCHEMA_RAW))
+    parser.add_argument("--schema-final", default=os.getenv("POSTGRES_SCHEMA_ELT", SCHEMA_FINAL))
+    parser.add_argument("--benchmark", action="store_true")
+    parser.add_argument("--benchmark-output", type=Path, default=BASE_DIR / "data" / "benchmark" / "enem_elt_resultados.csv")
+    parser.add_argument("--benchmark-summary-output", type=Path, default=BASE_DIR / "data" / "benchmark" / "enem_elt_resumo.txt")
+    parser.add_argument("--rodada", type=int, default=None)
+    parser.add_argument("--aquecimento", action="store_true")
     parser.add_argument(
         "--limite",
         type=int,
@@ -288,11 +458,22 @@ def main() -> None:
         help="Quantidade máxima de linhas lidas de cada arquivo; use 0 para todas.",
     )
     args = parser.parse_args()
-    tempos = executar_elt(args.database_url, None if args.limite == 0 else args.limite)
+    inicio_total = time.perf_counter()
+    monitor = MonitorRecursos()
+    if args.benchmark:
+        monitor.iniciar()
+    limite = None if args.limite == 0 else args.limite
+    tempos = executar_elt(args.database_url, limite, args.schema_raw, args.schema_final)
+    print(f"Leitura/preparacao: {tempos.leitura:.3f}s")
     print(f"Carga RAW: {tempos.carga_raw:.3f}s")
     print(f"Transformação SQL: {tempos.transformacao_sql:.3f}s")
     print(f"Validação: {tempos.validacao:.3f}s")
     print(f"Total: {tempos.total:.3f}s")
+    if args.benchmark:
+        finalizar_benchmark(
+            monitor, inicio_total, tempos, limite, args.rodada, args.aquecimento,
+            args.benchmark_output, args.benchmark_summary_output,
+        )
 
 
 if __name__ == "__main__":

@@ -165,3 +165,46 @@
 6. Adicionar monitoramento de CPU/RAM e registro padronizado das metricas.
 7. Executar aquecimento e rodadas validas nos volumes definidos na metodologia.
 8. Consolidar resultados, equivalencia e graficos comparativos.
+
+## Inicio do planejamento do benchmark ELT
+
+- Criado `docs/plano_benchmark_elt.md` com o plano de integracao do ELT ao
+  protocolo experimental.
+- A primeira etapa do benchmark ficara restrita ao ENEM e aos volumes de 100k,
+  500k, 1M e 3M por arquivo, antes da incorporacao da base TSE.
+- O trabalho foi dividido em interface de execucao, metricas padronizadas,
+  validacao SQL, comparacao de equivalencia e orquestracao das rodadas.
+- A ordem recomendada e validar primeiro um piloto pequeno e somente depois
+  executar as cinco rodadas oficiais.
+- Pendencias relevantes confirmadas: recuperar o interpretador do `.venv`,
+  evitar colisao de tabelas entre pipelines e alinhar a coleta de CPU/RAM.
+
+## Diagnostico do estado em 26/09/2026
+
+- O ETL do ENEM possui transformacao, validacoes, carga via `COPY` e coleta de
+  metricas; existe apenas uma rodada registrada para 100k.
+- O ELT ainda e um esqueleto: usa schemas fixos, valida somente contagens e nao
+  possui a interface nem as metricas completas do benchmark.
+- `src/benchmark.py` continua vazio; a orquestracao, a comparacao ETL x ELT e a
+  analise dos resultados ainda nao foram implementadas.
+- A execucao esta bloqueada no ambiente atual porque os interpretadores Python
+  global e do `.venv` nao iniciam. O PostgreSQL 18 esta instalado.
+- A base TSE esta presente em `data/raw`, mas ainda nao existe pipeline TSE em
+  `src/`; ela deve ficar para depois da validacao completa do ENEM.
+- Proxima sequencia recomendada: recuperar o ambiente Python, completar o ELT,
+  criar a comparacao de equivalencia, executar um piloto pequeno e somente
+  depois implementar/orquestrar as rodadas oficiais.
+
+## Acoplamento inicial do benchmark ao ELT
+
+- `src/elt/enem_elt.py` passou a aceitar schemas RAW/final configuraveis.
+- Adicionadas as opcoes `--benchmark`, `--benchmark-output`,
+  `--benchmark-summary-output`, `--rodada` e `--aquecimento`.
+- Adicionado registro estruturado das metricas de tempo, throughput, CPU e RAM
+  no formato equivalente ao ETL.
+- A medicao ainda precisa ser executada e revisada com Python/PostgreSQL. A
+  leitura/preparacao dos arquivos agora e registrada separadamente da criacao
+  das tabelas RAW, `COPY` e contagem da carga RAW; a leitura direta do arquivo
+  completo continua ocorrendo durante o `COPY`, por isso essa definicao deve
+  ser mantida igual em todos os cenarios.
+- As validacoes SQL ainda estao limitadas a contagem de linhas.
