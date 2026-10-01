@@ -1104,6 +1104,15 @@ def _salvar_resultado_benchmark(
     caminho: Path,
 ) -> None:
     caminho.parent.mkdir(parents=True, exist_ok=True)
+    existe = caminho.exists() and caminho.stat().st_size > 0
+    if existe:
+        with caminho.open("r", encoding="utf-8", newline="") as arquivo:
+            cabecalho = arquivo.readline()
+        if ";" not in cabecalho and "," in cabecalho:
+            raise ValueError(
+                f"O arquivo de benchmark {caminho} esta no formato antigo "
+                "(delimitador ','). Remova-o ou mova-o antes de continuar."
+            )
     linha_formatada = {}
     for campo, valor in resultado.__dict__.items():
         if isinstance(valor, float):
@@ -1115,7 +1124,10 @@ def _salvar_resultado_benchmark(
         caminho,
         mode="a",
         index=False,
-        header=not caminho.exists(),
+        header=not existe,
+        sep=";",
+        decimal=",",
+        encoding="utf-8",
     )
 
 

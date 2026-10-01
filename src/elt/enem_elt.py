@@ -410,17 +410,25 @@ def executar_elt(
 
 def salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
     caminho.parent.mkdir(parents=True, exist_ok=True)
+    existe = caminho.exists() and caminho.stat().st_size > 0
+    if existe:
+        with caminho.open("r", encoding="utf-8", newline="") as arquivo:
+            cabecalho = arquivo.readline()
+        if ";" not in cabecalho and "," in cabecalho:
+            raise ValueError(
+                f"O arquivo de benchmark {caminho} esta no formato antigo "
+                "(delimitador ','). Remova-o ou mova-o antes de continuar."
+            )
     campos = list(resultado.__dataclass_fields__)
-    existe = caminho.exists()
     linha = {}
     for campo in campos:
         valor = getattr(resultado, campo)
         if isinstance(valor, float):
             casas = 3 if campo.startswith("tempo_") else 2
-            valor = round(valor, casas)
+            valor = str(round(valor, casas)).replace(".", ",")
         linha[campo] = valor
     with caminho.open("a", newline="", encoding="utf-8") as arquivo:
-        escritor = csv.DictWriter(arquivo, fieldnames=campos)
+        escritor = csv.DictWriter(arquivo, fieldnames=campos, delimiter=";")
         if not existe:
             escritor.writeheader()
         escritor.writerow(linha)

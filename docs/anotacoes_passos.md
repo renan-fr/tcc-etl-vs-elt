@@ -247,3 +247,12 @@
 - A primeira versao nao compara resultados nem produz analise; apenas chama os
   pipelines e acumula os CSVs e resumos.
 - O teste tecnico com um volume e uma rodada foi concluido com sucesso.
+
+## Formato dos CSVs de benchmark para Power BI
+
+- Os CSVs de resultados passaram a usar `;` como delimitador de campos e `,`
+  como separador decimal, mantendo UTF-8.
+- A alteracao ficou restrita aos escritores de resultados do benchmark; os
+  CSVs de entrada do ENEM e o CSV interno usado pelo `COPY` permanecem iguais.
+- Foi adicionada protecao contra append em arquivos antigos com delimitador
+  `,`; esses arquivos devem ser removidos ou movidos antes de novas rodadas.

@@ -118,9 +118,11 @@ execução completa realiza 48 chamadas aos pipelines: 4 volumes × 6 execuçõe
 - `data/benchmark/resultados/enem_elt.csv`: métricas do ELT;
 - `data/benchmark/resumos/`: resumos das execuções.
 
-Os CSVs têm tempos com três casas decimais e as demais métricas numéricas com
-duas casas, sendo os arquivos principais para a análise dos tempos, throughput,
-CPU, RAM e quantidade de registros.
+Os CSVs usam `;` como delimitador de colunas e `,` como separador decimal,
+formato compatível com o Power BI em configuração pt-BR. Os tempos têm três
+casas decimais e as demais métricas numéricas têm duas casas. CSVs antigos,
+gerados com vírgula como delimitador, devem ser removidos ou movidos antes de
+iniciar novas rodadas.
 
 O `src/benchmark.py` automatiza somente a execução. A comparação de equivalência
 continua sendo executada separadamente com `src/comparar_equivalencia.py`.
