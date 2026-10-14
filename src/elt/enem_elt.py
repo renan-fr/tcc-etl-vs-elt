@@ -462,8 +462,8 @@ def main() -> None:
     parser.add_argument("--schema-raw", default=os.getenv("POSTGRES_SCHEMA_RAW", SCHEMA_RAW))
     parser.add_argument("--schema-final", default=os.getenv("POSTGRES_SCHEMA_ELT", SCHEMA_FINAL))
     parser.add_argument("--benchmark", action="store_true")
-    parser.add_argument("--benchmark-output", type=Path, default=BASE_DIR / "data" / "benchmark" / "resultados" / "enem_elt.csv")
-    parser.add_argument("--benchmark-summary-output", type=Path, default=BASE_DIR / "data" / "benchmark" / "resumos" / "enem_elt.txt")
+    parser.add_argument("--benchmark-output", type=Path, default=BASE_DIR / "data" / "benchmark" / "enem" / "resultados" / "enem_elt.csv")
+    parser.add_argument("--benchmark-summary-output", type=Path, default=BASE_DIR / "data" / "benchmark" / "enem" / "resumos" / "enem_elt.txt")
     parser.add_argument("--rodada", type=int, default=None)
     parser.add_argument("--aquecimento", action="store_true")
     parser.add_argument(

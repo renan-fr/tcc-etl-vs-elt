@@ -1401,14 +1401,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--benchmark-output",
         type=Path,
-        default=BASE_DIR / "data" / "benchmark" / "resultados" / "enem_etl.csv",
+        default=BASE_DIR / "data" / "benchmark" / "enem" / "resultados" / "enem_etl.csv",
         help="Arquivo CSV de saida das metricas do benchmark.",
     )
 
     parser.add_argument(
         "--benchmark-summary-output",
         type=Path,
-        default=BASE_DIR / "data" / "benchmark" / "resumos" / "enem_etl.txt",
+        default=BASE_DIR / "data" / "benchmark" / "enem" / "resumos" / "enem_etl.txt",
         help="Arquivo TXT de saida do resumo do benchmark.",
     )
 

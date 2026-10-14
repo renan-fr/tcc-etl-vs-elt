@@ -18,9 +18,7 @@ tabelas finais do ETL e do ELT.
 - O parâmetro `--limite` já limita cada arquivo de forma determinística.
 - O ELT mede carga RAW, transformação SQL, validação e tempo total, mas ainda não
   produz o contrato completo de métricas usado pelo ETL.
-- `src/benchmark.py` está vazio e poderá ser usado posteriormente como
-  orquestrador das rodadas, depois que os dois pipelines tiverem interfaces
-  compatíveis.
+- `src/benchmark/enem_benchmark.py` é o orquestrador específico do ENEM.
 
 ## Escopo da primeira implementação
 
@@ -93,7 +91,7 @@ A comparação deve gerar um relatório explícito de divergências. Diferenças
 resultado serão tratadas como falha do cenário, não como variação aceitável de
 implementação.
 
-### 5. Extrair a orquestração para `src/benchmark.py`
+### 5. Manter a orquestração em `src/benchmark/enem_benchmark.py`
 
 Quando as interfaces ETL e ELT estiverem estáveis, o orquestrador deverá:
 
@@ -128,7 +126,7 @@ de entrada de cada pipeline.
 3. Implementar validações SQL e mensagens de falha.
 4. Adicionar a comparação ETL × ELT em volume pequeno.
 5. Adicionar flags de benchmark e persistência dos resultados.
-6. Implementar o orquestrador das rodadas em `src/benchmark.py`.
+6. Manter o orquestrador das rodadas em `src/benchmark/enem_benchmark.py`.
 7. Executar piloto de 100k e revisar métricas, equivalência e consumo de
    recursos antes dos demais volumes.
 

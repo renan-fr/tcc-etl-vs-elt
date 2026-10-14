@@ -1,128 +1,27 @@
-# Benchmark ETL x ELT — ENEM
+# Benchmark ETL x ELT
 
-## 1. Preparação
+Este projeto compara o desempenho de ETL e ELT em dois cenários:
 
-No PowerShell, a partir da raiz do projeto:
+- ENEM: transformações predominantemente por registro, sem joins entre as
+  tabelas finais;
+- TSE: múltiplas fontes, granularidades, agregações e joins.
 
-```powershell
-.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
+## Documentação
 
-Configure a conexão PostgreSQL no `.env`:
+- [Execução do benchmark do ENEM](docs/enem/README.md)
+- [Metodologia experimental comum](docs/metodologia.md)
+- [Plano do ELT do ENEM](docs/enem/plano_benchmark_elt.md)
+- [Plano do TSE](docs/tse/plano_benchmark.md)
 
-```env
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_DB=tcc_etl_vs_elt
-POSTGRES_USER=seu_usuario
-POSTGRES_PASSWORD=sua_senha
-```
+## Dados e resultados
 
-Os arquivos ENEM devem estar em:
+Os dados brutos ficam separados por base em `data/raw/enem` e `data/raw/tse`.
+Os resultados de benchmark ficam separados em:
 
 ```text
-data/raw/enem/microdados_enem_2024/DADOS/
+data/benchmark/enem/
+data/benchmark/tse/
 ```
 
-## 2. Executar uma rodada ETL
-
-O volume é aplicado separadamente a cada arquivo de origem.
-
-```powershell
-.venv\Scripts\python.exe src\etl\enem_etl.py `
-  --limite 100000 `
-  --schema etl_benchmark `
-  --benchmark `
-  --rodada 1 `
-  --benchmark-output data\benchmark\resultados\enem_etl.csv `
-  --benchmark-summary-output data\benchmark\resumos\enem_etl.txt
-```
-
-## 3. Executar uma rodada ELT
-
-Use schemas diferentes para RAW e resultado final:
-
-```powershell
-.venv\Scripts\python.exe src\elt\enem_elt.py `
-  --limite 100000 `
-  --schema-raw raw_benchmark `
-  --schema-final elt_benchmark `
-  --benchmark `
-  --rodada 1 `
-  --benchmark-output data\benchmark\resultados\enem_elt.csv `
-  --benchmark-summary-output data\benchmark\resumos\enem_elt.txt
-```
-
-Use `--limite 0` para processar todos os registros. Os volumes definidos são:
-
-```text
-100000, 500000, 1000000 e 3000000 registros por arquivo
-```
-
-Use `--aquecimento` na execução de aquecimento. O aquecimento deve ser separado
-das cinco rodadas válidas:
-
-```powershell
-.venv\Scripts\python.exe src\etl\enem_etl.py --limite 100000 --schema etl_benchmark --benchmark --aquecimento --benchmark-output data\benchmark\resultados\enem_etl.csv
-.venv\Scripts\python.exe src\elt\enem_elt.py --limite 100000 --schema-raw raw_benchmark --schema-final elt_benchmark --benchmark --aquecimento --benchmark-output data\benchmark\resultados\enem_elt.csv
-```
-
-Repita cada cenário com `--rodada 1` até `--rodada 5`. Os resultados são
-acumulados nos arquivos CSV informados.
-
-## 4. Comparar os resultados ETL e ELT
-
-Após executar os dois pipelines com o mesmo volume:
-
-```powershell
-.venv\Scripts\python.exe src\comparar_equivalencia.py `
-  --schema-a etl_benchmark `
-  --schema-b elt_benchmark
-```
-
-O resultado esperado é:
-
-```text
-enem_participantes: OK
-enem_resultados: OK
-equivalencia=OK
-```
-
-Se houver divergência, o cenário não deve ser usado na análise de desempenho
-até que a causa seja corrigida.
-
-## 5. Automatizar aquecimentos e rodadas
-
-O `src/benchmark.py` executa automaticamente um aquecimento e as rodadas
-válidas para cada volume. Ele não compara resultados nem gera análises.
-
-Para executar o protocolo completo:
-
-```powershell
-.venv\Scripts\python.exe src\benchmark.py --rodadas 5
-```
-
-Para testar apenas um volume com uma rodada:
-
-```powershell
-.venv\Scripts\python.exe src\benchmark.py --volumes 100000 --rodadas 1
-```
-
-Os arquivos são acumulados em `data/benchmark/resultados/`. Por padrão, a
-execução completa realiza 48 chamadas aos pipelines: 4 volumes × 6 execuções
-(1 aquecimento + 5 rodadas) × 2 arquiteturas.
-
-## 6. Arquivos de resultados
-
-- `data/benchmark/resultados/enem_etl.csv`: métricas do ETL;
-- `data/benchmark/resultados/enem_elt.csv`: métricas do ELT;
-- `data/benchmark/resumos/`: resumos das execuções.
-
-Os CSVs usam `;` como delimitador de colunas e `,` como separador decimal,
-formato compatível com o Power BI em configuração pt-BR. Os tempos têm três
-casas decimais e as demais métricas numéricas têm duas casas. CSVs antigos,
-gerados com vírgula como delimitador, devem ser removidos ou movidos antes de
-iniciar novas rodadas.
-
-O `src/benchmark.py` automatiza somente a execução. A comparação de equivalência
-continua sendo executada separadamente com `src/comparar_equivalencia.py`.
+O pipeline TSE ainda será implementado conforme o escopo definido na
+metodologia.

@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 
-BASE_DIR = Path(__file__).resolve().parents[1]
+BASE_DIR = Path(__file__).resolve().parents[2]
 ETL_SCRIPT = BASE_DIR / "src" / "etl" / "enem_etl.py"
 ELT_SCRIPT = BASE_DIR / "src" / "elt" / "enem_elt.py"
 
@@ -77,7 +77,7 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=BASE_DIR / "data" / "benchmark" / "resultados",
+        default=BASE_DIR / "data" / "benchmark" / "enem" / "resultados",
         help="Diretório dos CSVs e resumos gerados.",
     )
     parser.add_argument(
