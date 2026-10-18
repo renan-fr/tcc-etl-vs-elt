@@ -17,13 +17,17 @@ Configure o PostgreSQL no `.env` e mantenha os arquivos em:
 data/raw/enem/microdados_enem_2024/DADOS/
 ```
 
+Os schemas usados por padrão são configurados por
+`POSTGRES_SCHEMA_ENEM_ETL_FINAL`, `POSTGRES_SCHEMA_ENEM_ELT_RAW` e
+`POSTGRES_SCHEMA_ENEM_ELT_FINAL`.
+
 ## Execução manual
 
 ETL:
 
 ```powershell
-.venv\Scripts\python.exe src\etl\enem_etl.py `
-  --limite 100000 --schema etl_benchmark --benchmark --rodada 1 `
+.venv\Scripts\python.exe src\etl\enem\enem_etl.py `
+  --limite 100000 --benchmark --rodada 1 `
   --benchmark-output data\benchmark\enem\resultados\enem_etl.csv `
   --benchmark-summary-output data\benchmark\enem\resumos\enem_etl.txt
 ```
@@ -31,9 +35,8 @@ ETL:
 ELT:
 
 ```powershell
-.venv\Scripts\python.exe src\elt\enem_elt.py `
-  --limite 100000 --schema-raw raw_benchmark --schema-final elt_benchmark `
-  --benchmark --rodada 1 `
+.venv\Scripts\python.exe src\elt\enem\enem_elt.py `
+  --limite 100000 --benchmark --rodada 1 `
   --benchmark-output data\benchmark\enem\resultados\enem_elt.csv `
   --benchmark-summary-output data\benchmark\enem\resumos\enem_elt.txt
 ```
@@ -46,13 +49,13 @@ Use `--aquecimento` para a execução preliminar e repita com `--rodada 1` até
 O orquestrador específico do ENEM é:
 
 ```powershell
-.venv\Scripts\python.exe src\benchmark\enem_benchmark.py --rodadas 5
+.venv\Scripts\python.exe src\benchmark\enem\enem_benchmark.py --rodadas 5
 ```
 
 Para um teste reduzido:
 
 ```powershell
-.venv\Scripts\python.exe src\benchmark\enem_benchmark.py --volumes 100000 --rodadas 1
+.venv\Scripts\python.exe src\benchmark\enem\enem_benchmark.py --volumes 100000 --rodadas 1
 ```
 
 ## Equivalência
@@ -60,12 +63,12 @@ Para um teste reduzido:
 Após executar ETL e ELT com o mesmo volume:
 
 ```powershell
-.venv\Scripts\python.exe src\validacao\enem_equivalencia.py `
-  --schema-a etl_benchmark --schema-b elt_benchmark
+.venv\Scripts\python.exe src\validacao\enem\enem_equivalencia.py `
+  --schema-a enem_etl_final --schema-b enem_elt_final
 ```
 
 O resultado só deve ser utilizado na análise de desempenho quando as tabelas
-`enem_participantes` e `enem_resultados` forem equivalentes.
+`participantes` e `resultados` dos schemas finais forem equivalentes.
 
 ## Resultados
 

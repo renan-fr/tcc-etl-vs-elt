@@ -6,9 +6,9 @@ import subprocess
 import sys
 
 
-BASE_DIR = Path(__file__).resolve().parents[2]
-ETL_SCRIPT = BASE_DIR / "src" / "etl" / "enem_etl.py"
-ELT_SCRIPT = BASE_DIR / "src" / "elt" / "enem_elt.py"
+BASE_DIR = Path(__file__).resolve().parents[3]
+ETL_SCRIPT = BASE_DIR / "src" / "etl" / "enem" / "enem_etl.py"
+ELT_SCRIPT = BASE_DIR / "src" / "elt" / "enem" / "enem_elt.py"
 
 
 def executar(comando: list[str]) -> None:
@@ -43,7 +43,6 @@ def executar_cenario(
         str(diretorio_resultados / "enem_etl.csv"),
         "--benchmark-summary-output",
         str(diretorio_resumos / "enem_etl.txt"),
-        "--schema", "etl_benchmark",
     ])
     executar([
         python, str(ELT_SCRIPT),
@@ -52,8 +51,6 @@ def executar_cenario(
         str(diretorio_resultados / "enem_elt.csv"),
         "--benchmark-summary-output",
         str(diretorio_resumos / "enem_elt.txt"),
-        "--schema-raw", "raw_benchmark",
-        "--schema-final", "elt_benchmark",
     ])
 
 

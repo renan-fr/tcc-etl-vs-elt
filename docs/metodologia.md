@@ -226,8 +226,8 @@ gerará diretamente as tabelas finais.
 As tabelas finais produzidas pelo ETL e pelo ELT deverão possuir exatamente o
 mesmo contrato definido para:
 
-- `enem_participantes`;
-- `enem_resultados`.
+- `participantes`;
+- `resultados`.
 
 As transformações realizadas no ETL em Python deverão possuir equivalentes em
 SQL no ELT, incluindo mapeamentos de categorias, tratamento de valores ausentes,
@@ -748,7 +748,7 @@ A base ENEM produzirá duas tabelas finais independentes. Não haverá `JOIN` en
 elas, nem relacionamento por chave estrangeira. Cada tabela alimentará gráficos
 com objetivos diferentes.
 
-### 16.1 Tabela `enem_participantes`
+### 16.1 Tabela `participantes`
 
 Cada registro representa um participante no arquivo de participantes.
 
@@ -771,7 +771,7 @@ regiao_prova          TEXT
 
 Essa tabela será utilizada para gráficos demográficos, sociais e geográficos.
 
-### 16.2 Tabela `enem_resultados`
+### 16.2 Tabela `resultados`
 
 Cada registro representa um resultado no arquivo de resultados.
 

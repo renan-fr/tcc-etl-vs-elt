@@ -17,17 +17,17 @@ from psycopg2 import sql
 from dotenv import load_dotenv
 
 
-BASE_DIR = Path(__file__).resolve().parents[2]
+BASE_DIR = Path(__file__).resolve().parents[3]
 PASTA_ENEM = BASE_DIR / "data" / "raw" / "enem" / "microdados_enem_2024" / "DADOS"
 CAMINHO_PARTICIPANTES = PASTA_ENEM / "PARTICIPANTES_2024.csv"
 CAMINHO_RESULTADOS = PASTA_ENEM / "RESULTADOS_2024.csv"
 
-SCHEMA_RAW = "raw"
-SCHEMA_FINAL = "elt"
-TABELA_RAW_PARTICIPANTES = "enem_participantes"
-TABELA_RAW_RESULTADOS = "enem_resultados"
-TABELA_FINAL_PARTICIPANTES = "enem_participantes"
-TABELA_FINAL_RESULTADOS = "enem_resultados"
+SCHEMA_RAW = "enem_elt_raw"
+SCHEMA_FINAL = "enem_elt_final"
+TABELA_RAW_PARTICIPANTES = "participantes"
+TABELA_RAW_RESULTADOS = "resultados"
+TABELA_FINAL_PARTICIPANTES = "participantes"
+TABELA_FINAL_RESULTADOS = "resultados"
 
 COLUNAS_PARTICIPANTES = [
     "NU_INSCRICAO", "TP_FAIXA_ETARIA", "TP_SEXO", "TP_COR_RACA",
@@ -459,8 +459,14 @@ def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(description="Esboço do pipeline ELT do ENEM 2024")
     parser.add_argument("--database-url", default=os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL"))
-    parser.add_argument("--schema-raw", default=os.getenv("POSTGRES_SCHEMA_RAW", SCHEMA_RAW))
-    parser.add_argument("--schema-final", default=os.getenv("POSTGRES_SCHEMA_ELT", SCHEMA_FINAL))
+    parser.add_argument(
+        "--schema-raw",
+        default=os.getenv("POSTGRES_SCHEMA_ENEM_ELT_RAW", SCHEMA_RAW),
+    )
+    parser.add_argument(
+        "--schema-final",
+        default=os.getenv("POSTGRES_SCHEMA_ENEM_ELT_FINAL", SCHEMA_FINAL),
+    )
     parser.add_argument("--benchmark", action="store_true")
     parser.add_argument("--benchmark-output", type=Path, default=BASE_DIR / "data" / "benchmark" / "enem" / "resultados" / "enem_elt.csv")
     parser.add_argument("--benchmark-summary-output", type=Path, default=BASE_DIR / "data" / "benchmark" / "enem" / "resumos" / "enem_elt.txt")

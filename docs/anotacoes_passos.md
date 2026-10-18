@@ -29,7 +29,7 @@
 
 ## ENEM - estado atual
 
-- Pipeline ETL implementado em `src/etl/enem_etl.py`.
+- Pipeline ETL implementado em `src/etl/enem/enem_etl.py`.
 - O script concentra extração, transformação, validação, carga PostgreSQL via
   `COPY` e instrumentação do benchmark.
 - Existe um resultado de benchmark ETL registrado em `data/benchmark/`, mas
@@ -40,8 +40,8 @@
   - `PARTICIPANTES_2024.csv`
   - `RESULTADOS_2024.csv`
 - Tabelas finais:
-  - `enem_participantes`
-  - `enem_resultados`
+  - `participantes`
+  - `resultados`
 - As tabelas sao independentes, sem `JOIN` obrigatorio.
 
 ## ENEM - regras principais
@@ -98,7 +98,7 @@
 
 ## O que revisar antes de continuar
 
-- Conferir se o contrato do ENEM em `docs/metodologia.md` bate com `src/etl/enem_etl.py`.
+- Conferir se o contrato do ENEM em `docs/metodologia.md` bate com `src/etl/enem/enem_etl.py`.
 - Conferir se os nomes das colunas finais estao adequados para os graficos.
 - Avaliar se `Nao informado` deve manter acento na saida final.
 - Verificar se a regra de presenca da redacao esta correta para o ENEM.
@@ -138,7 +138,7 @@
 
 ## Inicio da implementacao do ELT - ENEM
 
-- Criado o esqueleto `src/elt/enem_elt.py`.
+- Criado o esqueleto `src/elt/enem/enem_elt.py`.
 - O primeiro esqueleto cria tabelas RAW com as colunas originais do CSV em
   `TEXT`, carrega os arquivos por `COPY`, cria tabelas finais por SQL e mede
   carga RAW, transformacao, validacao e tempo total.
@@ -195,7 +195,7 @@
 
 ## Acoplamento inicial do benchmark ao ELT
 
-- `src/elt/enem_elt.py` passou a aceitar schemas RAW/final configuraveis.
+- `src/elt/enem/enem_elt.py` passou a aceitar schemas RAW/final configuraveis.
 - Adicionadas as opcoes `--benchmark`, `--benchmark-output`,
   `--benchmark-summary-output`, `--rodada` e `--aquecimento`.
 - Adicionado registro estruturado das metricas de tempo, throughput, CPU e RAM
@@ -219,7 +219,7 @@
   calculo exato em `numeric` no PostgreSQL; a formula SQL foi ajustada para
   preservar a semantica do ETL.
 - O piloto foi repetido e terminou com equivalencia total nas tabelas
-  `enem_participantes` e `enem_resultados`.
+  `participantes` e `resultados`.
 
 ## Preparacao para execucao manual dos benchmarks
 

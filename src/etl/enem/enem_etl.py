@@ -116,7 +116,7 @@ def limpar_relatorio_valores_desconhecidos() -> None:
 # CONFIGURAÇÕES
 # -------------
 
-BASE_DIR = Path(__file__).resolve().parents[2]
+BASE_DIR = Path(__file__).resolve().parents[3]
 
 PASTA_ENEM = (
     BASE_DIR
@@ -130,8 +130,8 @@ PASTA_ENEM = (
 CAMINHO_PARTICIPANTES = PASTA_ENEM / "PARTICIPANTES_2024.csv"
 CAMINHO_RESULTADOS = PASTA_ENEM / "RESULTADOS_2024.csv"
 
-TABELA_PARTICIPANTES = "enem_participantes"
-TABELA_RESULTADOS = "enem_resultados"
+TABELA_PARTICIPANTES = "participantes"
+TABELA_RESULTADOS = "resultados"
 
 CONTRATO_PARTICIPANTES = [
     ("id_participante", "TEXT"),
@@ -1371,11 +1371,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--schema",
-        default=(
-            os.getenv("POSTGRES_SCHEMA_ETL")
-            or os.getenv("POSTGRES_SCHEMA")
-            or "etl"
-        ),
+        default=os.getenv("POSTGRES_SCHEMA_ENEM_ETL_FINAL", "enem_etl_final"),
         help="Schema de destino no PostgreSQL.",
     )
 

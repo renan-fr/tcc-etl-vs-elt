@@ -42,7 +42,7 @@ def divergencias_por_coluna(cursor, schema_a: str, schema_b: str, tabela: str) -
     colunas_b = [linha[0] for linha in cursor.fetchall()]
     if colunas_a != colunas_b or not colunas_a:
         return [("estrutura", 1)]
-    chave = "id_participante" if tabela == "enem_participantes" else "id_resultado"
+    chave = "id_participante" if tabela == "participantes" else "id_resultado"
     divergencias = []
     for coluna in colunas_a:
         consulta = (
@@ -60,8 +60,16 @@ def divergencias_por_coluna(cursor, schema_a: str, schema_b: str, tabela: str) -
 def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(description="Compara resultados finais ETL e ELT")
-    parser.add_argument("--schema-a", required=True)
-    parser.add_argument("--schema-b", required=True)
+    parser.add_argument(
+        "--schema-a",
+        default=os.getenv("POSTGRES_SCHEMA_ENEM_ETL_FINAL", "enem_etl_final"),
+        help="Schema final produzido pelo ETL.",
+    )
+    parser.add_argument(
+        "--schema-b",
+        default=os.getenv("POSTGRES_SCHEMA_ENEM_ELT_FINAL", "enem_elt_final"),
+        help="Schema final produzido pelo ELT.",
+    )
     args = parser.parse_args()
 
     conexao = psycopg2.connect(
@@ -73,7 +81,7 @@ def main() -> None:
     )
     try:
         with conexao.cursor() as cursor:
-            tabelas = ["enem_participantes", "enem_resultados"]
+            tabelas = ["participantes", "resultados"]
             equivalente = True
             for tabela in tabelas:
                 resultado = comparar_tabela(cursor, args.schema_a, args.schema_b, tabela)
@@ -93,7 +101,7 @@ def main() -> None:
                     cursor, args.schema_a, args.schema_b, tabela
                 ):
                     print(f"  divergencia_{coluna}={quantidade}")
-                    if tabela == "enem_resultados" and coluna == "nota_media_objetivas":
+                    if tabela == "resultados" and coluna == "nota_media_objetivas":
                         cursor.execute(
                             f'SELECT a.id_resultado, a.nota_media_objetivas, '
                             f'b.nota_media_objetivas FROM "{args.schema_a}"."{tabela}" a '

@@ -37,7 +37,7 @@ contrato final.
 O resultado final sera uma unica tabela processada:
 
 ```text
-tse_resultado_municipio_cargo
+resultado_municipio_cargo
 ```
 
 Cada linha representara uma combinacao de:
@@ -122,7 +122,8 @@ A selecao dos volumes sera uma estrategia compartilhada por ETL e ELT.
 - a ordem original das linhas sera preservada;
 - `detalhe_votacao_secao_2024` sera a fonte de referencia do volume;
 - as linhas serao selecionadas ate atingir o volume nominal;
-- a chave completa de municipio/zona/cargo/turno sera preservada;
+- a chave logica completa sera preservada, incluindo ano, eleicao, turno,
+  municipio, zona e cargo;
 - a chave que ultrapassar o limite sera incluida integralmente;
 - as demais fontes serao filtradas pelas mesmas chaves;
 - as quantidades efetivas serao registradas separadamente por fonte.
@@ -130,6 +131,10 @@ A selecao dos volumes sera uma estrategia compartilhada por ETL e ELT.
 O volume nominal podera resultar em uma quantidade efetiva ligeiramente maior,
 pois nenhuma chave sera cortada no meio. O mesmo subconjunto e as mesmas
 quantidades efetivas deverao ser utilizados no ETL e no ELT.
+
+Os codigos municipais serao normalizados para texto com cinco posicoes antes
+da selecao e dos joins. Os manifestos de chaves de cada volume serao preparados
+antes das execucoes medidas e compartilhados entre ETL e ELT.
 
 ## Mapeamento das fontes
 
@@ -151,6 +156,11 @@ O candidato mais votado sera definido pela maior quantidade de
 `QT_VOTOS_NOMINAIS_VALIDOS`. Em caso de empate, sera utilizado o menor
 `SQ_CANDIDATO`. Seus dados preencherao o numero, nome, partido e quantidade de
 votos do candidato mais votado no produto final.
+
+O nome do candidato sera obtido de `NM_CANDIDATO`. A consolidacao utilizara
+`detalhe_votacao_munzona_2024` como universo do produto e fara `LEFT JOIN` com
+as agregacoes de secoes e candidatos. Chaves existentes somente nas fontes
+secundarias serao registradas como alerta e nao criarao linhas adicionais.
 
 As agregacoes de secoes e candidatos serao concluidas antes dos joins com a
 totalizacao municipal, evitando multiplicacao de registros.
@@ -186,7 +196,7 @@ abordagem.
 
 ## Contrato final de colunas
 
-A tabela `tse_resultado_municipio_cargo` contera 34 colunas, organizadas assim.
+A tabela `resultado_municipio_cargo` contera 34 colunas, organizadas assim.
 
 ### Identificacao
 
@@ -257,6 +267,8 @@ pct_votos_candidato_mais_votado =
 ```
 
 Os percentuais serao nulos quando o denominador for nulo ou igual a zero.
+Os resultados serao arredondados para seis casas decimais com a mesma regra no
+ETL e no ELT.
 
 ## Tipos e nulos
 
@@ -338,26 +350,26 @@ data/benchmark/tse/resumos/
 O ETL utilizara:
 
 ```text
-etl_tse_benchmark.tse_resultado_municipio_cargo
+tse_etl_final.resultado_municipio_cargo
 ```
 
 O ELT utilizara:
 
 ```text
-raw_tse_benchmark.tse_detalhe_votacao_munzona
-raw_tse_benchmark.tse_detalhe_votacao_secao
-raw_tse_benchmark.tse_votacao_candidato_munzona
+tse_elt_raw.detalhe_votacao_munzona
+tse_elt_raw.detalhe_votacao_secao
+tse_elt_raw.votacao_candidato_munzona
 
-staging_tse_benchmark.stg_tse_munzona
-staging_tse_benchmark.stg_tse_secao
-staging_tse_benchmark.stg_tse_candidato
+tse_elt_staging.munzona
+tse_elt_staging.secao
+tse_elt_staging.candidato
 
-processed_tse_benchmark.tse_resultado_municipio_cargo
+tse_elt_final.resultado_municipio_cargo
 ```
 
 A equivalencia final sera verificada entre:
 
 ```text
-etl_tse_benchmark.tse_resultado_municipio_cargo
-processed_tse_benchmark.tse_resultado_municipio_cargo
+tse_etl_final.resultado_municipio_cargo
+tse_elt_final.resultado_municipio_cargo
 ```

@@ -12,25 +12,26 @@ tabelas finais do ETL e do ELT.
 
 ## Estado de partida
 
-- `src/elt/enem_elt.py` já carrega os arquivos em tabelas `raw` via `COPY`.
+- `src/elt/enem/enem_elt.py` já carrega os arquivos no schema
+  `enem_elt_raw` via `COPY`.
 - O script já executa as transformações SQL para as tabelas finais do schema
-  `elt`.
+  `enem_elt_final`.
 - O parâmetro `--limite` já limita cada arquivo de forma determinística.
 - O ELT mede carga RAW, transformação SQL, validação e tempo total, mas ainda não
   produz o contrato completo de métricas usado pelo ETL.
-- `src/benchmark/enem_benchmark.py` é o orquestrador específico do ENEM.
+- `src/benchmark/enem/enem_benchmark.py` é o orquestrador específico do ENEM.
 
 ## Escopo da primeira implementação
 
 A primeira versão deve cobrir somente o ENEM, nos volumes de 100k, 500k, 1M e
-3M por arquivo, com os schemas `raw` e `elt`. A base TSE e análises gráficas
+3M por arquivo, com os schemas `enem_elt_raw` e `enem_elt_final`. A base TSE e análises gráficas
 ficam fora desta etapa.
 
 ## Etapas planejadas
 
 ### 1. Fechar a interface de execução do ELT
 
-Adicionar ao `src/elt/enem_elt.py` os parâmetros equivalentes aos disponíveis no
+Adicionar ao `src/elt/enem/enem_elt.py` os parâmetros equivalentes aos disponíveis no
 ETL:
 
 - `--benchmark`;
@@ -91,7 +92,7 @@ A comparação deve gerar um relatório explícito de divergências. Diferenças
 resultado serão tratadas como falha do cenário, não como variação aceitável de
 implementação.
 
-### 5. Manter a orquestração em `src/benchmark/enem_benchmark.py`
+### 5. Manter a orquestração em `src/benchmark/enem/enem_benchmark.py`
 
 Quando as interfaces ETL e ELT estiverem estáveis, o orquestrador deverá:
 
@@ -126,7 +127,7 @@ de entrada de cada pipeline.
 3. Implementar validações SQL e mensagens de falha.
 4. Adicionar a comparação ETL × ELT em volume pequeno.
 5. Adicionar flags de benchmark e persistência dos resultados.
-6. Manter o orquestrador das rodadas em `src/benchmark/enem_benchmark.py`.
+6. Manter o orquestrador das rodadas em `src/benchmark/enem/enem_benchmark.py`.
 7. Executar piloto de 100k e revisar métricas, equivalência e consumo de
    recursos antes dos demais volumes.
 
