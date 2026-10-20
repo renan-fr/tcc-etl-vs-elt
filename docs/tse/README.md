@@ -41,3 +41,36 @@ python src\etl\tse\tse_etl.py --limite 100000 `
 
 O throughput usa a soma das linhas efetivas de `munzona`, secao e candidato.
 As diferencas entre totalizacao municipal e secoes sao registradas como alertas.
+
+## ELT
+
+O ELT reutiliza a mesma selecao de fontes e o mesmo manifesto do ETL. As linhas
+selecionadas sao carregadas como texto em `tse_elt_raw`, transformadas por SQL
+em `tse_elt_staging` e consolidadas em
+`tse_elt_final.resultado_municipio_cargo`.
+
+Execucao do piloto:
+
+```powershell
+python src\elt\tse\tse_elt.py --limite 100000 `
+  --manifesto-chaves data\benchmark\tse\subconjuntos\chaves_100000.csv
+```
+
+Execucao com registro das metricas:
+
+```powershell
+python src\elt\tse\tse_elt.py --limite 100000 `
+  --manifesto-chaves data\benchmark\tse\subconjuntos\chaves_100000.csv `
+  --benchmark --rodada 1
+```
+
+## Equivalencia do produto final
+
+Depois de executar ETL e ELT com o mesmo manifesto:
+
+```powershell
+python src\validacao\tse\tse_equivalencia.py
+```
+
+A verificacao compara estrutura, tipos, nulabilidade, quantidade de linhas e
+valores, incluindo duplicidades, por meio de diferencas nos dois sentidos.
