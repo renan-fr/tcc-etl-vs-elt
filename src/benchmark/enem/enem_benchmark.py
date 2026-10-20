@@ -9,6 +9,9 @@ import sys
 BASE_DIR = Path(__file__).resolve().parents[3]
 ETL_SCRIPT = BASE_DIR / "src" / "etl" / "enem" / "enem_etl.py"
 ELT_SCRIPT = BASE_DIR / "src" / "elt" / "enem" / "enem_elt.py"
+EQUIVALENCIA_SCRIPT = (
+    BASE_DIR / "src" / "validacao" / "enem" / "enem_equivalencia.py"
+)
 
 
 def executar(comando: list[str]) -> None:
@@ -52,6 +55,7 @@ def executar_cenario(
         "--benchmark-summary-output",
         str(diretorio_resumos / "enem_elt.txt"),
     ])
+    executar([python, str(EQUIVALENCIA_SCRIPT)])
 
 
 def main() -> None:

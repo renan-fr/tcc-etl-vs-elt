@@ -42,6 +42,102 @@ COLUNAS_RESULTADOS = [
     "NU_NOTA_LC", "NU_NOTA_MT", "NU_NOTA_REDACAO",
 ]
 
+CONTRATO_PARTICIPANTES = [
+    ("id_participante", "text"),
+    ("faixa_etaria", "text"),
+    ("sexo", "text"),
+    ("cor_raca", "text"),
+    ("situacao_conclusao", "text"),
+    ("treineiro", "boolean"),
+    ("municipio_prova", "text"),
+    ("uf_prova", "text"),
+    ("faixa_renda", "text"),
+    ("possui_internet", "boolean"),
+    ("tipo_escola_em", "text"),
+    ("regiao_prova", "text"),
+]
+
+CONTRATO_RESULTADOS = [
+    ("id_resultado", "text"),
+    ("municipio_escola", "text"),
+    ("uf_escola", "text"),
+    ("dependencia_escola", "text"),
+    ("localizacao_escola", "text"),
+    ("presenca_cn", "text"),
+    ("presenca_ch", "text"),
+    ("presenca_lc", "text"),
+    ("presenca_mt", "text"),
+    ("presenca_redacao", "text"),
+    ("nota_cn", "numeric"),
+    ("nota_ch", "numeric"),
+    ("nota_lc", "numeric"),
+    ("nota_mt", "numeric"),
+    ("nota_redacao", "numeric"),
+    ("regiao_escola", "text"),
+    ("nota_media_objetivas", "numeric"),
+    ("presente_completo", "boolean"),
+]
+
+DOMINIOS_PARTICIPANTES = {
+    "faixa_etaria": {
+        "Menor de 17 anos", "17 anos", "18 anos", "19 anos", "20 anos",
+        "21 anos", "22 anos", "23 anos", "24 anos", "25 anos",
+        "Entre 26 e 30 anos", "Entre 31 e 35 anos", "Entre 36 e 40 anos",
+        "Entre 41 e 45 anos", "Entre 46 e 50 anos", "Entre 51 e 55 anos",
+        "Entre 56 e 60 anos", "Entre 61 e 65 anos", "Entre 66 e 70 anos",
+        "Maior de 70 anos", "Não informado",
+    },
+    "sexo": {"Masculino", "Feminino", "Não informado"},
+    "cor_raca": {
+        "Não declarado", "Branca", "Preta", "Parda", "Amarela", "Indígena",
+        "Não dispõe da informação", "Não informado",
+    },
+    "situacao_conclusao": {
+        "Já concluí o Ensino Médio",
+        "Estou cursando e concluirei o Ensino Médio em 2024",
+        "Estou cursando e concluirei o Ensino Médio após 2024",
+        "Não concluí e não estou cursando o Ensino Médio",
+        "Não informado",
+    },
+    "faixa_renda": {
+        "Nenhuma Renda", "Até R$ 1.412,00", "De R$ 1.412,01 até R$ 2.118,00",
+        "De R$ 2.118,01 até R$ 2.824,00", "De R$ 2.824,01 até R$ 3.530,00",
+        "De R$ 3.530,01 até R$ 4.236,00", "De R$ 4.236,01 até R$ 5.648,00",
+        "De R$ 5.648,01 até R$ 7.060,00", "De R$ 7.060,01 até R$ 8.472,00",
+        "De R$ 8.472,01 até R$ 9.884,00", "De R$ 9.884,01 até R$ 11.296,00",
+        "De R$ 11.296,01 até R$ 12.708,00", "De R$ 12.708,01 até R$ 14.120,00",
+        "De R$ 14.120,01 até R$ 16.944,00", "De R$ 16.944,01 até R$ 21.180,00",
+        "De R$ 21.180,01 até R$ 28.240,00", "Acima de R$ 28.240,00",
+        "Não informado",
+    },
+    "tipo_escola_em": {
+        "Somente em escola pública",
+        "Parte em escola pública e parte em escola privada sem bolsa integral",
+        "Parte em escola pública e parte em escola privada com bolsa integral",
+        "Somente em escola privada sem bolsa integral",
+        "Somente em escola privada com bolsa integral",
+        "Não frequentei escola de Ensino Médio",
+        "Não informado",
+    },
+    "regiao_prova": {"Norte", "Nordeste", "Centro-Oeste", "Sudeste", "Sul", "Não informado"},
+}
+
+DOMINIOS_RESULTADOS = {
+    "dependencia_escola": {"Federal", "Estadual", "Municipal", "Privada", "Não informado"},
+    "localizacao_escola": {"Urbana", "Rural", "Não informado"},
+    "presenca_cn": {"Faltou à prova", "Presente na prova", "Eliminado na prova", "Não informado"},
+    "presenca_ch": {"Faltou à prova", "Presente na prova", "Eliminado na prova", "Não informado"},
+    "presenca_lc": {"Faltou à prova", "Presente na prova", "Eliminado na prova", "Não informado"},
+    "presenca_mt": {"Faltou à prova", "Presente na prova", "Eliminado na prova", "Não informado"},
+    "presenca_redacao": {"Faltou à prova", "Presente na prova", "Eliminado na prova", "Não informado"},
+    "regiao_escola": {"Norte", "Nordeste", "Centro-Oeste", "Sudeste", "Sul", "Não informado"},
+}
+
+COLUNAS_NOTAS = [
+    "nota_cn", "nota_ch", "nota_lc", "nota_mt", "nota_redacao",
+    "nota_media_objetivas",
+]
+
 
 @dataclass(frozen=True)
 class TemposELT:
@@ -83,6 +179,17 @@ class ResultadoBenchmark:
     linhas_participantes: int
     linhas_resultados: int
     timestamp: str
+
+
+@dataclass(frozen=True)
+class ResultadoValidacao:
+    tabela: str
+    erros: list[str]
+    alertas: list[str]
+
+    @property
+    def valido(self) -> bool:
+        return not self.erros
 
 
 class MonitorRecursos:
@@ -363,6 +470,376 @@ def transformar_resultados_sql(cursor, schema_raw: str, schema_final: str) -> No
     cursor.execute(sql_texto)
 
 
+def _tabela(schema: str, tabela: str):
+    return sql.SQL("{}.{}").format(sql.Identifier(schema), sql.Identifier(tabela))
+
+
+def _contar_linhas(cursor, schema: str, tabela: str) -> int:
+    cursor.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(_tabela(schema, tabela)))
+    return int(cursor.fetchone()[0])
+
+
+def _contar_condicao(
+    cursor,
+    schema: str,
+    tabela: str,
+    condicao,
+) -> int:
+    cursor.execute(
+        sql.SQL("SELECT COUNT(*) FROM {} WHERE {}").format(
+            _tabela(schema, tabela), condicao
+        )
+    )
+    return int(cursor.fetchone()[0])
+
+
+def _obter_estrutura(cursor, schema: str, tabela: str) -> list[tuple[str, str]]:
+    cursor.execute(
+        """
+        SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = %s AND table_name = %s
+        ORDER BY ordinal_position
+        """,
+        (schema, tabela),
+    )
+    return [(str(nome), str(tipo)) for nome, tipo in cursor.fetchall()]
+
+
+def _validar_estrutura(
+    cursor,
+    schema: str,
+    tabela: str,
+    contrato: list[tuple[str, str]],
+    erros: list[str],
+) -> bool:
+    estrutura = _obter_estrutura(cursor, schema, tabela)
+    if estrutura != contrato:
+        erros.append(
+            "Estrutura, ordem ou tipos divergem do contrato. "
+            f"Esperado: {contrato}. Encontrado: {estrutura}."
+        )
+        return False
+    return True
+
+
+def _validar_identificador(
+    cursor,
+    schema: str,
+    tabela: str,
+    coluna: str,
+    erros: list[str],
+) -> None:
+    identificador = sql.Identifier(coluna)
+    nulos = _contar_condicao(
+        cursor,
+        schema,
+        tabela,
+        sql.SQL("{} IS NULL").format(identificador),
+    )
+    cursor.execute(
+        sql.SQL(
+            "SELECT COALESCE(SUM(quantidade - 1), 0) FROM ("
+            "SELECT COUNT(*) AS quantidade FROM {} GROUP BY {} HAVING COUNT(*) > 1"
+            ") duplicados"
+        ).format(_tabela(schema, tabela), identificador)
+    )
+    duplicados = int(cursor.fetchone()[0])
+    if nulos:
+        erros.append(f"{coluna} possui {nulos} valores nulos.")
+    if duplicados:
+        erros.append(f"{coluna} possui {duplicados} valores duplicados.")
+
+
+def _validar_dominios(
+    cursor,
+    schema: str,
+    tabela: str,
+    dominios: dict[str, set[str]],
+    erros: list[str],
+) -> None:
+    for coluna, valores_validos in dominios.items():
+        identificador = sql.Identifier(coluna)
+        valores = sql.SQL(", ").join(
+            sql.Literal(valor) for valor in sorted(valores_validos)
+        )
+        invalidos = _contar_condicao(
+            cursor,
+            schema,
+            tabela,
+            sql.SQL("{} IS NOT NULL AND {} NOT IN ({})").format(
+                identificador, identificador, valores
+            ),
+        )
+        if invalidos:
+            erros.append(f"{coluna} possui {invalidos} valores fora do domínio.")
+
+
+def _case_regiao(coluna: str):
+    grupos = {
+        "Norte": ("AC", "AP", "AM", "PA", "RO", "RR", "TO"),
+        "Nordeste": ("AL", "BA", "CE", "MA", "PB", "PE", "PI", "RN", "SE"),
+        "Centro-Oeste": ("DF", "GO", "MT", "MS"),
+        "Sudeste": ("ES", "MG", "RJ", "SP"),
+        "Sul": ("PR", "RS", "SC"),
+    }
+    casos = []
+    for regiao, ufs in grupos.items():
+        casos.append(
+            sql.SQL("WHEN {} IN ({}) THEN {}").format(
+                sql.Identifier(coluna),
+                sql.SQL(", ").join(sql.Literal(uf) for uf in ufs),
+                sql.Literal(regiao),
+            )
+        )
+    return sql.SQL("CASE {} ELSE {} END").format(
+        sql.SQL(" ").join(casos), sql.Literal("Não informado")
+    )
+
+
+def _validar_regiao(
+    cursor,
+    schema: str,
+    tabela: str,
+    coluna_uf: str,
+    coluna_regiao: str,
+    erros: list[str],
+) -> None:
+    divergentes = _contar_condicao(
+        cursor,
+        schema,
+        tabela,
+        sql.SQL("{} <> {} AND {} IS DISTINCT FROM ({})").format(
+            sql.Identifier(coluna_uf),
+            sql.Literal("Não informado"),
+            sql.Identifier(coluna_regiao),
+            _case_regiao(coluna_uf),
+        ),
+    )
+    if divergentes:
+        erros.append(
+            f"{coluna_uf} e {coluna_regiao} possuem "
+            f"{divergentes} combinações inconsistentes."
+        )
+
+
+def _adicionar_alertas_ausencias(
+    cursor,
+    schema: str,
+    tabela: str,
+    contrato: list[tuple[str, str]],
+    alertas: list[str],
+) -> None:
+    for coluna, tipo in contrato:
+        identificador = sql.Identifier(coluna)
+        nulos = _contar_condicao(
+            cursor, schema, tabela, sql.SQL("{} IS NULL").format(identificador)
+        )
+        if nulos:
+            alertas.append(f"{tabela}.{coluna} possui {nulos} valores nulos.")
+        if tipo == "text":
+            nao_informados = _contar_condicao(
+                cursor,
+                schema,
+                tabela,
+                sql.SQL("{} = {}").format(
+                    identificador, sql.Literal("Não informado")
+                ),
+            )
+            if nao_informados:
+                alertas.append(
+                    f"{tabela}.{coluna} possui {nao_informados} valores "
+                    "'Não informado'."
+                )
+
+
+def validar_participantes(
+    cursor,
+    schema: str,
+    linhas_origem: int,
+) -> ResultadoValidacao:
+    tabela = TABELA_FINAL_PARTICIPANTES
+    erros: list[str] = []
+    alertas: list[str] = []
+    if not _validar_estrutura(
+        cursor, schema, tabela, CONTRATO_PARTICIPANTES, erros
+    ):
+        return ResultadoValidacao(tabela, erros, alertas)
+
+    linhas_finais = _contar_linhas(cursor, schema, tabela)
+    if linhas_finais != linhas_origem:
+        erros.append(
+            f"Quantidade de linhas divergente: origem={linhas_origem}, "
+            f"final={linhas_finais}."
+        )
+    _validar_identificador(
+        cursor, schema, tabela, "id_participante", erros
+    )
+    _validar_dominios(
+        cursor, schema, tabela, DOMINIOS_PARTICIPANTES, erros
+    )
+    _validar_regiao(
+        cursor, schema, tabela, "uf_prova", "regiao_prova", erros
+    )
+    _adicionar_alertas_ausencias(
+        cursor, schema, tabela, CONTRATO_PARTICIPANTES, alertas
+    )
+    return ResultadoValidacao(tabela, erros, alertas)
+
+
+def _validar_media_objetivas(
+    cursor,
+    schema: str,
+    tabela: str,
+    erros: list[str],
+) -> None:
+    tabela_sql = _tabela(schema, tabela)
+    cursor.execute(
+        sql.SQL(
+            """
+            SELECT COUNT(*)
+            FROM (
+                SELECT *,
+                    (
+                        nota_cn::double precision
+                        + nota_ch::double precision
+                        + nota_lc::double precision
+                        + nota_mt::double precision
+                    ) / 4 AS media_bruta
+                FROM {}
+            ) dados
+            WHERE nota_media_objetivas IS DISTINCT FROM
+                CASE
+                    WHEN media_bruta IS NULL THEN NULL
+                    ELSE (
+                        CASE
+                            WHEN media_bruta * 100 - FLOOR(media_bruta * 100) < 0.5
+                                THEN FLOOR(media_bruta * 100)
+                            WHEN media_bruta * 100 - FLOOR(media_bruta * 100) > 0.5
+                                THEN FLOOR(media_bruta * 100) + 1
+                            WHEN FLOOR(media_bruta * 100)
+                                - FLOOR(FLOOR(media_bruta * 100) / 2) * 2 = 0
+                                THEN FLOOR(media_bruta * 100)
+                            ELSE FLOOR(media_bruta * 100) + 1
+                        END
+                    ) / 100
+                END
+            """
+        ).format(tabela_sql)
+    )
+    divergentes = int(cursor.fetchone()[0])
+    if divergentes:
+        erros.append(
+            "nota_media_objetivas possui "
+            f"{divergentes} valores inconsistentes."
+        )
+
+
+def validar_resultados(
+    cursor,
+    schema: str,
+    linhas_origem: int,
+) -> ResultadoValidacao:
+    tabela = TABELA_FINAL_RESULTADOS
+    erros: list[str] = []
+    alertas: list[str] = []
+    if not _validar_estrutura(cursor, schema, tabela, CONTRATO_RESULTADOS, erros):
+        return ResultadoValidacao(tabela, erros, alertas)
+
+    linhas_finais = _contar_linhas(cursor, schema, tabela)
+    if linhas_finais != linhas_origem:
+        erros.append(
+            f"Quantidade de linhas divergente: origem={linhas_origem}, "
+            f"final={linhas_finais}."
+        )
+    _validar_identificador(cursor, schema, tabela, "id_resultado", erros)
+    _validar_dominios(cursor, schema, tabela, DOMINIOS_RESULTADOS, erros)
+
+    for coluna in COLUNAS_NOTAS:
+        invalidas = _contar_condicao(
+            cursor,
+            schema,
+            tabela,
+            sql.SQL("{} IS NOT NULL AND ({} < 0 OR {} > 1000)").format(
+                sql.Identifier(coluna),
+                sql.Identifier(coluna),
+                sql.Identifier(coluna),
+            ),
+        )
+        if invalidas:
+            erros.append(
+                f"{coluna} possui {invalidas} notas fora do intervalo 0-1000."
+            )
+
+    _validar_regiao(
+        cursor, schema, tabela, "uf_escola", "regiao_escola", erros
+    )
+    _validar_media_objetivas(cursor, schema, tabela, erros)
+
+    presenca_divergente = _contar_condicao(
+        cursor,
+        schema,
+        tabela,
+        sql.SQL(
+            "presente_completo IS DISTINCT FROM ("
+            "presenca_cn = 'Presente na prova' "
+            "AND presenca_ch = 'Presente na prova' "
+            "AND presenca_lc = 'Presente na prova' "
+            "AND presenca_mt = 'Presente na prova' "
+            "AND presenca_redacao = 'Presente na prova')"
+        ),
+    )
+    if presenca_divergente:
+        erros.append(
+            f"presente_completo possui {presenca_divergente} valores inconsistentes."
+        )
+
+    pares_presenca_nota = {
+        "presenca_cn": "nota_cn",
+        "presenca_ch": "nota_ch",
+        "presenca_lc": "nota_lc",
+        "presenca_mt": "nota_mt",
+        "presenca_redacao": "nota_redacao",
+    }
+    for coluna_presenca, coluna_nota in pares_presenca_nota.items():
+        inconsistentes = _contar_condicao(
+            cursor,
+            schema,
+            tabela,
+            sql.SQL("{} <> {} AND {} IS NOT NULL").format(
+                sql.Identifier(coluna_presenca),
+                sql.Literal("Presente na prova"),
+                sql.Identifier(coluna_nota),
+            ),
+        )
+        if inconsistentes:
+            alertas.append(
+                f"{coluna_nota} possui {inconsistentes} notas com "
+                f"{coluna_presenca} diferente de presente."
+            )
+
+    _adicionar_alertas_ausencias(
+        cursor, schema, tabela, CONTRATO_RESULTADOS, alertas
+    )
+    return ResultadoValidacao(tabela, erros, alertas)
+
+
+def _imprimir_validacao(resultado: ResultadoValidacao) -> None:
+    print(f"Validação {resultado.tabela}:")
+    if resultado.valido:
+        print("  Erros críticos: nenhum")
+    else:
+        print("  Erros críticos:")
+        for erro in resultado.erros:
+            print(f"  - {erro}")
+    if resultado.alertas:
+        print("  Alertas:")
+        for alerta in resultado.alertas:
+            print(f"  - {alerta}")
+    else:
+        print("  Alertas: nenhum")
+
+
 def executar_elt(
     database_url: str | None,
     limite: int | None,
@@ -376,11 +853,11 @@ def executar_elt(
             inicio = time.perf_counter()
             criar_tabela_raw(cursor, schema_raw, TABELA_RAW_PARTICIPANTES, ler_cabecalho(CAMINHO_PARTICIPANTES))
             criar_tabela_raw(cursor, schema_raw, TABELA_RAW_RESULTADOS, ler_cabecalho(CAMINHO_RESULTADOS))
-            _, leitura_participantes, _ = carregar_csv_raw(
+            linhas_raw_participantes, leitura_participantes, _ = carregar_csv_raw(
                 cursor, CAMINHO_PARTICIPANTES, schema_raw,
                 TABELA_RAW_PARTICIPANTES, limite,
             )
-            _, leitura_resultados, _ = carregar_csv_raw(
+            linhas_raw_resultados, leitura_resultados, _ = carregar_csv_raw(
                 cursor, CAMINHO_RESULTADOS, schema_raw,
                 TABELA_RAW_RESULTADOS, limite,
             )
@@ -395,12 +872,24 @@ def executar_elt(
             tempo_sql = time.perf_counter() - inicio
 
             inicio = time.perf_counter()
-            cursor.execute(f'SELECT COUNT(*) FROM "{schema_final}"."{TABELA_FINAL_PARTICIPANTES}"')
-            linhas_participantes = int(cursor.fetchone()[0])
-            cursor.execute(f'SELECT COUNT(*) FROM "{schema_final}"."{TABELA_FINAL_RESULTADOS}"')
-            linhas_resultados = int(cursor.fetchone()[0])
-            conexao.commit()
+            validacao_participantes = validar_participantes(
+                cursor, schema_final, linhas_raw_participantes
+            )
+            validacao_resultados = validar_resultados(
+                cursor, schema_final, linhas_raw_resultados
+            )
             tempo_validacao = time.perf_counter() - inicio
+
+            _imprimir_validacao(validacao_participantes)
+            _imprimir_validacao(validacao_resultados)
+            erros = validacao_participantes.erros + validacao_resultados.erros
+            if erros:
+                raise ValueError(
+                    "Pipeline interrompido por erros críticos de validação."
+                )
+
+            linhas_participantes = linhas_raw_participantes
+            linhas_resultados = linhas_raw_resultados
 
     return TemposELT(
         tempo_leitura, tempo_raw, tempo_sql, tempo_validacao, time.perf_counter() - inicio_total,
@@ -457,7 +946,7 @@ def finalizar_benchmark(monitor, inicio_total, tempos, limite, rodada, aquecimen
 
 def main() -> None:
     load_dotenv()
-    parser = argparse.ArgumentParser(description="Esboço do pipeline ELT do ENEM 2024")
+    parser = argparse.ArgumentParser(description="Pipeline ELT do ENEM 2024")
     parser.add_argument("--database-url", default=os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL"))
     parser.add_argument(
         "--schema-raw",
@@ -479,12 +968,21 @@ def main() -> None:
         help="Quantidade máxima de linhas lidas de cada arquivo; use 0 para todas.",
     )
     args = parser.parse_args()
+    if args.limite < 0:
+        parser.error("--limite deve ser maior ou igual a zero.")
     inicio_total = time.perf_counter()
     monitor = MonitorRecursos()
     if args.benchmark:
         monitor.iniciar()
     limite = None if args.limite == 0 else args.limite
-    tempos = executar_elt(args.database_url, limite, args.schema_raw, args.schema_final)
+    try:
+        tempos = executar_elt(
+            args.database_url, limite, args.schema_raw, args.schema_final
+        )
+    except (psycopg2.Error, UnicodeError, ValueError) as erro:
+        if args.benchmark:
+            monitor.parar()
+        raise SystemExit(f"Falha no pipeline ELT do ENEM: {erro}") from erro
     print(f"Leitura/preparacao: {tempos.leitura:.3f}s")
     print(f"Carga RAW: {tempos.carga_raw:.3f}s")
     print(f"Transformação SQL: {tempos.transformacao_sql:.3f}s")

@@ -74,13 +74,16 @@ Para um teste reduzido:
 .venv\Scripts\python.exe src\benchmark\enem\enem_benchmark.py --volumes 100000 --rodadas 1
 ```
 
+Depois de cada par ETL/ELT, o orquestrador executa automaticamente a validação
+de equivalência. Uma divergência interrompe o benchmark.
+
 ## Equivalência do produto final
 
 Após executar ETL e ELT com o mesmo volume:
 
 ```powershell
 .venv\Scripts\python.exe src\validacao\enem\enem_equivalencia.py `
-  --schema-a enem_etl_final --schema-b enem_elt_final
+  --schema-etl enem_etl_final --schema-elt enem_elt_final
 ```
 
 O resultado só deve ser utilizado na análise de desempenho quando as tabelas
