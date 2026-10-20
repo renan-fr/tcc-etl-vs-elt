@@ -9,10 +9,10 @@ Este projeto compara o desempenho de ETL e ELT em dois cenários:
 ## Documentação
 
 - [Execução do benchmark do ENEM](docs/enem/README.md)
+- [Plano do benchmark do ENEM](docs/enem/plano_benchmark.md)
 - [Metodologia experimental comum](docs/metodologia.md)
-- [Plano do ELT do ENEM](docs/enem/plano_benchmark_elt.md)
-- [Execucao do benchmark do TSE](docs/tse/README.md)
-- [Plano do TSE](docs/tse/plano_benchmark.md)
+- [Execução do benchmark do TSE](docs/tse/README.md)
+- [Plano do benchmark do TSE](docs/tse/plano_benchmark.md)
 
 ## Dados e resultados
 
@@ -50,6 +50,3 @@ tse_elt_final
 Os nomes das tabelas representam apenas a entidade, pois fonte, processo e
 camada já estão identificados pelo schema. As conexões e os nomes dos schemas
 são configurados explicitamente no `.env`; use `.env.example` como modelo.
-
-O pipeline TSE ainda será implementado conforme o escopo definido na
-metodologia.

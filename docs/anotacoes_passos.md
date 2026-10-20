@@ -168,7 +168,7 @@
 
 ## Inicio do planejamento do benchmark ELT
 
-- Criado `docs/plano_benchmark_elt.md` com o plano de integracao do ELT ao
+- Criado `docs/enem/plano_benchmark.md` com o plano de integração do ELT ao
   protocolo experimental.
 - A primeira etapa do benchmark ficara restrita ao ENEM e aos volumes de 100k,
   500k, 1M e 3M por arquivo, antes da incorporacao da base TSE.

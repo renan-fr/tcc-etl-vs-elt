@@ -1,9 +1,10 @@
 # Benchmark ETL x ELT — ENEM
 
-Este documento descreve a execução específica do benchmark do ENEM. O protocolo
-experimental comum está em [docs/metodologia.md](../metodologia.md).
+Este documento descreve a preparação e a execução do benchmark do ENEM. O
+contrato do produto está em [plano_benchmark.md](plano_benchmark.md), e o
+protocolo comum está em [docs/metodologia.md](../metodologia.md).
 
-## Preparação
+## Preparação dos dados
 
 Na raiz do projeto:
 
@@ -21,9 +22,19 @@ Os schemas usados por padrão são configurados por
 `POSTGRES_SCHEMA_ENEM_ETL_FINAL`, `POSTGRES_SCHEMA_ENEM_ELT_RAW` e
 `POSTGRES_SCHEMA_ENEM_ELT_FINAL`.
 
-## Execução manual
+O mesmo limite deve ser usado nos dois pipelines. No ENEM, o volume é aplicado
+separadamente a `PARTICIPANTES_2024.csv` e `RESULTADOS_2024.csv`.
 
-ETL:
+## ETL
+
+Validação sem carga no PostgreSQL:
+
+```powershell
+.venv\Scripts\python.exe src\etl\enem\enem_etl.py `
+  --limite 100000 --somente-validar
+```
+
+Execução com carga e registro das métricas:
 
 ```powershell
 .venv\Scripts\python.exe src\etl\enem\enem_etl.py `
@@ -32,7 +43,12 @@ ETL:
   --benchmark-summary-output data\benchmark\enem\resumos\enem_etl.txt
 ```
 
-ELT:
+## ELT
+
+O ELT carrega os arquivos como texto em `enem_elt_raw` e cria as tabelas
+processadas em `enem_elt_final` por meio de transformações SQL.
+
+Execução com carga e registro das métricas:
 
 ```powershell
 .venv\Scripts\python.exe src\elt\enem\enem_elt.py `
@@ -58,7 +74,7 @@ Para um teste reduzido:
 .venv\Scripts\python.exe src\benchmark\enem\enem_benchmark.py --volumes 100000 --rodadas 1
 ```
 
-## Equivalência
+## Equivalência do produto final
 
 Após executar ETL e ELT com o mesmo volume:
 
