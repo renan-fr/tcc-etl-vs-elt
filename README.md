@@ -48,12 +48,16 @@ src/
 └── tse/
     ├── etl.py
     ├── elt.py
+    ├── contrato.py
     ├── comum.py
     ├── preparar_subconjuntos.py
     └── equivalencia.py
 ```
 
 O orquestrador do benchmark do TSE será acrescentado em uma etapa posterior.
+Os pipelines ETL e ELT não importam um ao outro. Ambos usam o mesmo contrato
+final e os mesmos manifestos de subconjuntos, mas implementam separadamente a
+leitura e o processamento das fontes.
 
 ## Organização no PostgreSQL
 

@@ -9,9 +9,8 @@ import os
 from pathlib import Path
 import threading
 import time
-from typing import Any
+from typing import Any, Iterator
 
-import pandas as pd
 import psutil
 import psycopg2
 from psycopg2 import sql
@@ -20,12 +19,60 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
-from etl import (
-    CHAVE_FINAL,
-    CONTRATO_FINAL,
-    ResultadoValidacao,
-    extrair_fontes,
-)
+from contrato import CHAVE_FINAL, CONTRATO_FINAL
+
+
+PASTA_TSE = BASE_DIR / "data" / "raw" / "tse"
+PASTA_MUNZONA = PASTA_TSE / "detalhe_votacao_munzona_2024"
+PASTA_SECAO = PASTA_TSE / "detalhe_votacao_secao_2024"
+PASTA_CANDIDATO = PASTA_TSE / "votacao_candidato_munzona_2024"
+
+COLUNAS_CHAVE_ORIGEM = [
+    "ANO_ELEICAO",
+    "CD_ELEICAO",
+    "NR_TURNO",
+    "CD_MUNICIPIO",
+    "NR_ZONA",
+    "CD_CARGO",
+]
+
+COLUNAS_MUNZONA = [
+    *COLUNAS_CHAVE_ORIGEM,
+    "SG_UF",
+    "NM_MUNICIPIO",
+    "DS_CARGO",
+    "QT_APTOS",
+    "QT_COMPARECIMENTO",
+    "QT_ABSTENCOES",
+    "QT_TOTAL_VOTOS_VALIDOS",
+    "QT_VOTOS_NOMINAIS_VALIDOS",
+    "QT_TOTAL_VOTOS_LEG_VALIDOS",
+    "QT_VOTOS_BRANCOS",
+    "QT_TOTAL_VOTOS_NULOS",
+    "QT_TOTAL_VOTOS_ANULADOS",
+]
+
+COLUNAS_SECAO = [
+    *COLUNAS_CHAVE_ORIGEM,
+    "SG_UF",
+    "NR_SECAO",
+    "QT_COMPARECIMENTO",
+    "QT_ABSTENCOES",
+    "QT_VOTOS_NOMINAIS",
+    "QT_VOTOS_BRANCOS",
+    "QT_VOTOS_NULOS",
+    "QT_VOTOS_LEGENDA",
+]
+
+COLUNAS_CANDIDATO = [
+    *COLUNAS_CHAVE_ORIGEM,
+    "SG_UF",
+    "SQ_CANDIDATO",
+    "NR_CANDIDATO",
+    "NM_CANDIDATO",
+    "SG_PARTIDO",
+    "QT_VOTOS_NOMINAIS_VALIDOS",
+]
 
 
 SCHEMA_RAW = "tse_elt_raw"
@@ -39,6 +86,32 @@ TABELA_STAGING_MUNZONA = "munzona"
 TABELA_STAGING_SECAO = "secao"
 TABELA_STAGING_CANDIDATO = "candidato"
 TABELA_FINAL = "resultado_municipio_cargo"
+
+
+@dataclass(frozen=True)
+class SelecaoManifesto:
+    chaves: frozenset[tuple[str, ...]]
+    ufs: frozenset[str]
+
+
+@dataclass(frozen=True)
+class ResultadoCargaRaw:
+    linhas_munzona: int
+    linhas_secao: int
+    linhas_candidato: int
+    tempo_leitura: float
+    tempo_carga: float
+
+
+@dataclass(frozen=True)
+class ResultadoValidacao:
+    tabela: str
+    erros: list[str]
+    alertas: list[str]
+
+    @property
+    def valido(self) -> bool:
+        return not self.erros
 
 
 @dataclass(frozen=True)
@@ -76,6 +149,141 @@ class ResultadoBenchmark:
 
 
 ConexaoPostgres = str | dict[str, Any]
+
+
+def _normalizar_chave(linha: dict[str, str]) -> tuple[str, ...]:
+    valores = []
+    for coluna in COLUNAS_CHAVE_ORIGEM:
+        valor = (linha.get(coluna) or "").strip()
+        if coluna == "CD_MUNICIPIO":
+            valor = valor.zfill(5)
+        valores.append(valor)
+    return tuple(valores)
+
+
+def ler_selecao_manifesto(caminho: Path) -> SelecaoManifesto:
+    if not caminho.is_file():
+        raise ValueError(f"Manifesto de chaves nao encontrado: {caminho}")
+
+    with caminho.open("r", encoding="utf-8-sig", newline="") as arquivo:
+        leitor = csv.DictReader(arquivo)
+        colunas = set(leitor.fieldnames or [])
+        obrigatorias = {"SG_UF", *COLUNAS_CHAVE_ORIGEM}
+        faltantes = sorted(obrigatorias - colunas)
+        if faltantes:
+            raise ValueError(
+                "Manifesto sem colunas obrigatorias: " + ", ".join(faltantes)
+            )
+
+        chaves: set[tuple[str, ...]] = set()
+        ufs: set[str] = set()
+        for linha in leitor:
+            chaves.add(_normalizar_chave(linha))
+            uf = (linha.get("SG_UF") or "").strip()
+            if uf:
+                ufs.add(uf)
+
+    if not chaves:
+        raise ValueError(f"Manifesto de chaves vazio: {caminho}")
+    return SelecaoManifesto(frozenset(chaves), frozenset(ufs))
+
+
+def _arquivos_estaduais(
+    pasta: Path,
+    ufs: frozenset[str] | None,
+) -> list[Path]:
+    arquivos = [
+        caminho
+        for caminho in pasta.glob("*.csv")
+        if not caminho.stem.upper().endswith("_BRASIL")
+        and (ufs is None or caminho.stem.rsplit("_", 1)[-1] in ufs)
+    ]
+    if not arquivos:
+        raise ValueError(f"Nenhum CSV estadual encontrado em {pasta}.")
+    return sorted(arquivos, key=lambda caminho: caminho.name)
+
+
+class FluxoCSVFiltrado:
+    """Produz CSV em blocos sem materializar a fonte inteira em memoria."""
+
+    def __init__(
+        self,
+        pasta: Path,
+        colunas: list[str],
+        selecao: SelecaoManifesto | None,
+        linhas_por_bloco: int = 4_096,
+    ) -> None:
+        self._pasta = pasta
+        self._colunas = colunas
+        self._selecao = selecao
+        self._linhas_por_bloco = linhas_por_bloco
+        self._blocos = self._gerar_blocos()
+        self._pendente = ""
+        self.linhas = 0
+        self.tempo_leitura = 0.0
+
+    def read(self, tamanho: int = -1) -> str:
+        if tamanho is None or tamanho < 0:
+            tamanho = 64 * 1024
+        while len(self._pendente) < tamanho:
+            try:
+                self._pendente += next(self._blocos)
+            except StopIteration:
+                break
+        resultado = self._pendente[:tamanho]
+        self._pendente = self._pendente[tamanho:]
+        return resultado
+
+    def _iterar_linhas(self) -> Iterator[list[str]]:
+        ufs = self._selecao.ufs if self._selecao else None
+        for caminho in _arquivos_estaduais(self._pasta, ufs):
+            with caminho.open("r", encoding="latin-1", newline="") as arquivo:
+                leitor = csv.DictReader(arquivo, delimiter=";")
+                presentes = set(leitor.fieldnames or [])
+                faltantes = sorted(set(self._colunas) - presentes)
+                if faltantes:
+                    raise ValueError(
+                        f"{caminho.name} sem colunas obrigatorias: "
+                        + ", ".join(faltantes)
+                    )
+
+                for linha in leitor:
+                    chave = _normalizar_chave(linha)
+                    if self._selecao and chave not in self._selecao.chaves:
+                        continue
+                    valores = []
+                    for coluna in self._colunas:
+                        valor = linha.get(coluna) or ""
+                        if coluna in COLUNAS_CHAVE_ORIGEM:
+                            valor = valor.strip()
+                            if coluna == "CD_MUNICIPIO":
+                                valor = valor.zfill(5)
+                        valores.append(valor)
+                    yield valores
+
+    def _gerar_blocos(self) -> Iterator[str]:
+        cabecalho = StringIO()
+        csv.writer(cabecalho, lineterminator="\n").writerow(self._colunas)
+        yield cabecalho.getvalue()
+
+        linhas = self._iterar_linhas()
+        finalizado = False
+        while not finalizado:
+            inicio = time.perf_counter()
+            buffer = StringIO()
+            escritor = csv.writer(buffer, lineterminator="\n")
+            quantidade = 0
+            for _ in range(self._linhas_por_bloco):
+                try:
+                    escritor.writerow(next(linhas))
+                    quantidade += 1
+                except StopIteration:
+                    finalizado = True
+                    break
+            self.tempo_leitura += time.perf_counter() - inicio
+            if quantidade:
+                self.linhas += quantidade
+                yield buffer.getvalue()
 
 
 def obter_conexao_postgres(database_url: str | None = None) -> ConexaoPostgres:
@@ -129,35 +337,53 @@ def _criar_tabela_texto(cursor, schema: str, tabela: str, colunas: list[str]) ->
     )
 
 
-def _copiar_dataframe(
+def _carregar_fonte_raw(
     cursor,
-    dataframe: pd.DataFrame,
     schema: str,
     tabela: str,
-) -> None:
-    buffer = StringIO()
-    dataframe.to_csv(buffer, index=False, header=True, na_rep="")
-    buffer.seek(0)
+    pasta: Path,
+    colunas: list[str],
+    selecao: SelecaoManifesto | None,
+) -> tuple[int, float, float]:
+    inicio_total = time.perf_counter()
+    _criar_tabela_texto(cursor, schema, tabela, colunas)
+    fluxo = FluxoCSVFiltrado(pasta, colunas, selecao)
     comando = sql.SQL(
         "COPY {}.{} ({}) FROM STDIN WITH "
         "(FORMAT CSV, HEADER TRUE, NULL '')"
     ).format(
         sql.Identifier(schema),
         sql.Identifier(tabela),
-        sql.SQL(", ").join(sql.Identifier(coluna) for coluna in dataframe.columns),
+        sql.SQL(", ").join(sql.Identifier(coluna) for coluna in colunas),
     )
-    cursor.copy_expert(comando.as_string(cursor), buffer)
+    cursor.copy_expert(comando.as_string(cursor), fluxo)
+    tempo_total = time.perf_counter() - inicio_total
+    tempo_carga = max(0.0, tempo_total - fluxo.tempo_leitura)
+    return fluxo.linhas, fluxo.tempo_leitura, tempo_carga
 
 
-def carregar_raw(cursor, schema_raw: str, fontes) -> None:
+def carregar_raw(
+    cursor,
+    schema_raw: str,
+    selecao: SelecaoManifesto | None,
+) -> ResultadoCargaRaw:
     tabelas = (
-        (TABELA_RAW_MUNZONA, fontes.munzona),
-        (TABELA_RAW_SECAO, fontes.secao),
-        (TABELA_RAW_CANDIDATO, fontes.candidato),
+        (TABELA_RAW_MUNZONA, PASTA_MUNZONA, COLUNAS_MUNZONA),
+        (TABELA_RAW_SECAO, PASTA_SECAO, COLUNAS_SECAO),
+        (TABELA_RAW_CANDIDATO, PASTA_CANDIDATO, COLUNAS_CANDIDATO),
     )
-    for tabela, dataframe in tabelas:
-        _criar_tabela_texto(cursor, schema_raw, tabela, list(dataframe.columns))
-        _copiar_dataframe(cursor, dataframe, schema_raw, tabela)
+    resultados = []
+    for tabela, pasta, colunas in tabelas:
+        resultados.append(
+            _carregar_fonte_raw(cursor, schema_raw, tabela, pasta, colunas, selecao)
+        )
+    return ResultadoCargaRaw(
+        linhas_munzona=resultados[0][0],
+        linhas_secao=resultados[1][0],
+        linhas_candidato=resultados[2][0],
+        tempo_leitura=sum(resultado[1] for resultado in resultados),
+        tempo_carga=sum(resultado[2] for resultado in resultados),
+    )
 
 
 def construir_staging(
@@ -802,16 +1028,28 @@ def _salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
 
 def executar(args: argparse.Namespace) -> None:
     inicio_total = time.perf_counter()
+    if args.limite is not None and args.manifesto_chaves is None:
+        raise SystemExit(
+            "O TSE ELT exige --manifesto-chaves quando --limite e informado. "
+            "Prepare o manifesto antes da execucao."
+        )
+
     monitor = MonitorRecursos()
     if args.benchmark:
         monitor.iniciar()
 
-    inicio = time.perf_counter()
-    fontes = extrair_fontes(args.limite, args.manifesto_chaves)
-    tempo_leitura = time.perf_counter() - inicio
-    linhas_munzona = len(fontes.munzona)
-    linhas_secao = len(fontes.secao)
-    linhas_candidato = len(fontes.candidato)
+    inicio_manifesto = time.perf_counter()
+    try:
+        selecao = (
+            ler_selecao_manifesto(args.manifesto_chaves)
+            if args.manifesto_chaves is not None
+            else None
+        )
+    except (OSError, ValueError, csv.Error) as erro:
+        if args.benchmark:
+            monitor.parar()
+        raise SystemExit(str(erro)) from erro
+    tempo_manifesto = time.perf_counter() - inicio_manifesto
 
     tempo_validacao: float | None = None
     validacao: ResultadoValidacao | None = None
@@ -825,11 +1063,15 @@ def executar(args: argparse.Namespace) -> None:
     try:
         with _conectar_postgres(conexao_postgres) as conexao:
             with conexao.cursor() as cursor:
-                inicio = time.perf_counter()
-                carregar_raw(cursor, args.schema_raw, fontes)
+                carga_raw = carregar_raw(cursor, args.schema_raw, selecao)
+                inicio_commit = time.perf_counter()
                 conexao.commit()
-                tempo_carga = time.perf_counter() - inicio
-                del fontes
+                tempo_commit = time.perf_counter() - inicio_commit
+                tempo_leitura = tempo_manifesto + carga_raw.tempo_leitura
+                tempo_carga = carga_raw.tempo_carga + tempo_commit
+                linhas_munzona = carga_raw.linhas_munzona
+                linhas_secao = carga_raw.linhas_secao
+                linhas_candidato = carga_raw.linhas_candidato
 
                 inicio = time.perf_counter()
                 construir_staging(cursor, args.schema_raw, args.schema_staging)
@@ -845,7 +1087,7 @@ def executar(args: argparse.Namespace) -> None:
                         cursor, args.schema_staging, args.schema_final
                     )
                     tempo_validacao = time.perf_counter() - inicio
-    except (psycopg2.Error, UnicodeError, ValueError) as erro:
+    except (psycopg2.Error, UnicodeError, ValueError, OSError, csv.Error) as erro:
         if args.benchmark:
             monitor.parar()
         raise SystemExit(f"Falha no pipeline ELT do TSE: {erro}") from erro

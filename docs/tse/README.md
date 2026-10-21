@@ -44,10 +44,20 @@ As diferenças entre totalização municipal e seções são registradas como al
 
 ## ELT
 
-O ELT reutiliza a mesma selecao de fontes e o mesmo manifesto do ETL. As linhas
-selecionadas sao carregadas como texto em `tse_elt_raw`, transformadas por SQL
-em `tse_elt_staging` e consolidadas em
+O ELT reutiliza a mesma seleção de fontes e o mesmo manifesto do ETL. As linhas
+selecionadas são transmitidas dos CSVs para `tse_elt_raw` por `COPY`, sem
+materializar as fontes completas em DataFrames. Depois, são transformadas por
+SQL em `tse_elt_staging` e consolidadas em
 `tse_elt_final.resultado_municipio_cargo`.
+
+Quando `--limite` for informado, o manifesto correspondente deve existir e ser
+passado com `--manifesto-chaves`. A preparação do subconjunto fica fora da
+execução medida.
+
+Como a leitura e o `COPY` acontecem em fluxo, `tempo_leitura` registra o tempo
+gasto para ler, filtrar e montar os blocos enviados ao banco. `tempo_carga`
+registra o restante da operação de carga, incluindo a confirmação da transação.
+O `tempo_total` permanece como a métrica principal do pipeline completo.
 
 Execução do piloto:
 

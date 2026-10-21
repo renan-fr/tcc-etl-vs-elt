@@ -27,6 +27,7 @@ from comum import (
     salvar_manifesto_chaves,
     selecionar_secoes,
 )
+from contrato import CHAVE_FINAL, CONTRATO_FINAL
 
 
 PASTA_TSE = BASE_DIR / "data" / "raw" / "tse"
@@ -35,14 +36,6 @@ PASTA_SECAO = PASTA_TSE / "detalhe_votacao_secao_2024"
 PASTA_CANDIDATO = PASTA_TSE / "votacao_candidato_munzona_2024"
 
 TABELA_FINAL = "resultado_municipio_cargo"
-CHAVE_FINAL = [
-    "ano_eleicao",
-    "cd_eleicao",
-    "nr_turno",
-    "cd_municipio",
-    "nr_zona",
-    "cd_cargo",
-]
 
 COLUNAS_MUNZONA = [
     *COLUNAS_CHAVE_ORIGEM,
@@ -81,44 +74,6 @@ COLUNAS_CANDIDATO = [
     "SG_PARTIDO",
     "QT_VOTOS_NOMINAIS_VALIDOS",
 ]
-
-CONTRATO_FINAL = [
-    ("ano_eleicao", "INTEGER NOT NULL"),
-    ("cd_eleicao", "INTEGER NOT NULL"),
-    ("nr_turno", "INTEGER NOT NULL"),
-    ("sg_uf", "TEXT NOT NULL"),
-    ("cd_municipio", "TEXT NOT NULL"),
-    ("nm_municipio", "TEXT NOT NULL"),
-    ("nr_zona", "INTEGER NOT NULL"),
-    ("cd_cargo", "INTEGER NOT NULL"),
-    ("ds_cargo", "TEXT NOT NULL"),
-    ("qt_aptos", "BIGINT NOT NULL"),
-    ("qt_comparecimento", "BIGINT NOT NULL"),
-    ("qt_abstencoes", "BIGINT NOT NULL"),
-    ("qt_total_votos_validos", "BIGINT NOT NULL"),
-    ("qt_votos_nominais_validos", "BIGINT NOT NULL"),
-    ("qt_total_votos_leg_validos", "BIGINT NOT NULL"),
-    ("qt_votos_brancos", "BIGINT NOT NULL"),
-    ("qt_total_votos_nulos", "BIGINT NOT NULL"),
-    ("qt_total_votos_anulados", "BIGINT NOT NULL"),
-    ("qt_secoes_processadas", "BIGINT NOT NULL"),
-    ("qt_comparecimento_secao", "BIGINT NOT NULL"),
-    ("qt_abstencoes_secao", "BIGINT NOT NULL"),
-    ("qt_votos_nominais_secao", "BIGINT NOT NULL"),
-    ("qt_votos_brancos_secao", "BIGINT NOT NULL"),
-    ("qt_votos_nulos_secao", "BIGINT NOT NULL"),
-    ("qt_votos_legenda_secao", "BIGINT NOT NULL"),
-    ("qt_candidatos", "BIGINT NOT NULL"),
-    ("qt_votos_candidatos", "BIGINT NOT NULL"),
-    ("nr_candidato_mais_votado", "TEXT"),
-    ("nm_candidato_mais_votado", "TEXT"),
-    ("sg_partido_candidato_mais_votado", "TEXT"),
-    ("qt_votos_candidato_mais_votado", "BIGINT"),
-    ("pct_comparecimento", "NUMERIC(9,6)"),
-    ("pct_abstencao", "NUMERIC(9,6)"),
-    ("pct_votos_candidato_mais_votado", "NUMERIC(9,6)"),
-]
-
 
 @dataclass(frozen=True)
 class FontesTSE:
