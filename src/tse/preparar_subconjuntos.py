@@ -4,9 +4,9 @@ import argparse
 from pathlib import Path
 
 
-BASE_DIR = Path(__file__).resolve().parents[3]
+BASE_DIR = Path(__file__).resolve().parents[2]
 
-from tse_comum import (  # noqa: E402
+from comum import (
     COLUNAS_MANIFESTO,
     salvar_manifesto_chaves,
     selecionar_secoes,

@@ -6,12 +6,10 @@ import subprocess
 import sys
 
 
-BASE_DIR = Path(__file__).resolve().parents[3]
-ETL_SCRIPT = BASE_DIR / "src" / "etl" / "enem" / "enem_etl.py"
-ELT_SCRIPT = BASE_DIR / "src" / "elt" / "enem" / "enem_elt.py"
-EQUIVALENCIA_SCRIPT = (
-    BASE_DIR / "src" / "validacao" / "enem" / "enem_equivalencia.py"
-)
+BASE_DIR = Path(__file__).resolve().parents[2]
+ETL_SCRIPT = BASE_DIR / "src" / "enem" / "etl.py"
+ELT_SCRIPT = BASE_DIR / "src" / "enem" / "elt.py"
+EQUIVALENCIA_SCRIPT = BASE_DIR / "src" / "enem" / "equivalencia.py"
 
 
 def executar(comando: list[str]) -> None:

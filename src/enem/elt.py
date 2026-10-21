@@ -17,7 +17,7 @@ from psycopg2 import sql
 from dotenv import load_dotenv
 
 
-BASE_DIR = Path(__file__).resolve().parents[3]
+BASE_DIR = Path(__file__).resolve().parents[2]
 PASTA_ENEM = BASE_DIR / "data" / "raw" / "enem" / "microdados_enem_2024" / "DADOS"
 CAMINHO_PARTICIPANTES = PASTA_ENEM / "PARTICIPANTES_2024.csv"
 CAMINHO_RESULTADOS = PASTA_ENEM / "RESULTADOS_2024.csv"

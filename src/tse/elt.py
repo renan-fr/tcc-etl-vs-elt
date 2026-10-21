@@ -7,7 +7,6 @@ from datetime import datetime
 from io import StringIO
 import os
 from pathlib import Path
-import sys
 import threading
 import time
 from typing import Any
@@ -19,12 +18,9 @@ from psycopg2 import sql
 from dotenv import load_dotenv
 
 
-BASE_DIR = Path(__file__).resolve().parents[3]
-TSE_ETL_DIR = BASE_DIR / "src" / "etl" / "tse"
-if str(TSE_ETL_DIR) not in sys.path:
-    sys.path.insert(0, str(TSE_ETL_DIR))
+BASE_DIR = Path(__file__).resolve().parents[2]
 
-from tse_etl import (  # noqa: E402
+from etl import (
     CHAVE_FINAL,
     CONTRATO_FINAL,
     ResultadoValidacao,

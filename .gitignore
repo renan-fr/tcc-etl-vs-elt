@@ -1,4 +1,3 @@
-```gitignore
 # Dados brutos
 data/raw/*
 !data/raw/.gitkeep
@@ -32,7 +31,6 @@ AGENTS.md
 # Sistema operacional
 .DS_Store
 Thumbs.db
-```
 
 # Estudo de trabalhos relacionados
 leituras_trabalhos_referencia/

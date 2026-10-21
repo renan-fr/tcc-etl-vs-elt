@@ -33,6 +33,28 @@ data/benchmark/enem/
 data/benchmark/tse/
 ```
 
+## Organização dos pipelines
+
+Os scripts estão agrupados por base para manter ENEM e TSE visualmente
+espelhados:
+
+```text
+src/
+├── enem/
+│   ├── etl.py
+│   ├── elt.py
+│   ├── benchmark.py
+│   └── equivalencia.py
+└── tse/
+    ├── etl.py
+    ├── elt.py
+    ├── comum.py
+    ├── preparar_subconjuntos.py
+    └── equivalencia.py
+```
+
+O orquestrador do benchmark do TSE será acrescentado em uma etapa posterior.
+
 ## Organização no PostgreSQL
 
 Os schemas seguem o padrão `<fonte>_<processo>_<camada>`:

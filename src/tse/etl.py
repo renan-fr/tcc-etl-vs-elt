@@ -7,7 +7,6 @@ from decimal import Decimal, ROUND_HALF_UP
 from io import StringIO
 import os
 from pathlib import Path
-import sys
 import threading
 import time
 from typing import Any
@@ -19,12 +18,9 @@ from psycopg2 import sql
 from dotenv import load_dotenv
 
 
-BASE_DIR = Path(__file__).resolve().parents[3]
-TSE_BENCHMARK_DIR = BASE_DIR / "src" / "benchmark" / "tse"
-if str(TSE_BENCHMARK_DIR) not in sys.path:
-    sys.path.insert(0, str(TSE_BENCHMARK_DIR))
+BASE_DIR = Path(__file__).resolve().parents[2]
 
-from tse_comum import (  # noqa: E402
+from comum import (
     COLUNAS_CHAVE_ORIGEM,
     filtrar_fonte_por_chaves,
     ler_manifesto_chaves,

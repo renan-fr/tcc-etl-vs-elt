@@ -29,11 +29,11 @@
 
 ## ENEM - estado atual
 
-- Pipeline ETL implementado em `src/etl/enem/enem_etl.py`.
+- Pipeline ETL implementado em `src/enem/etl.py`.
 - O script concentra extração, transformação, validação, carga PostgreSQL via
   `COPY` e instrumentação do benchmark.
 - Existe um resultado de benchmark ETL registrado em `data/benchmark/`, mas
-  `src/benchmark.py` ainda está vazio.
+  `src/enem/benchmark.py` ainda está vazio.
 - A reexecução operacional ficou pendente nesta revisão porque o `.venv`
   aponta para um executável Python que não está mais disponível no ambiente.
 - Arquivos esperados:
@@ -83,7 +83,7 @@
   comparação final.
 - Definir e implementar o carregamento bruto do ELT, as tabelas RAW e as
   transformações SQL equivalentes ao contrato do ENEM.
-- Implementar o benchmark em `src/benchmark.py`.
+- Implementar o benchmark em `src/enem/benchmark.py`.
 - Documentar melhor as bases em `docs/datasets.md`.
 - Fechar as transformacoes da base TSE.
 - Registrar versoes de Python, PostgreSQL e bibliotecas.
@@ -98,7 +98,7 @@
 
 ## O que revisar antes de continuar
 
-- Conferir se o contrato do ENEM em `docs/metodologia.md` bate com `src/etl/enem/enem_etl.py`.
+- Conferir se o contrato do ENEM em `docs/metodologia.md` bate com `src/enem/etl.py`.
 - Conferir se os nomes das colunas finais estao adequados para os graficos.
 - Avaliar se `Nao informado` deve manter acento na saida final.
 - Verificar se a regra de presenca da redacao esta correta para o ENEM.
@@ -138,7 +138,7 @@
 
 ## Inicio da implementacao do ELT - ENEM
 
-- Criado o esqueleto `src/elt/enem/enem_elt.py`.
+- Criado o esqueleto `src/enem/elt.py`.
 - O primeiro esqueleto cria tabelas RAW com as colunas originais do CSV em
   `TEXT`, carrega os arquivos por `COPY`, cria tabelas finais por SQL e mede
   carga RAW, transformacao, validacao e tempo total.
@@ -185,7 +185,7 @@
   metricas; existe apenas uma rodada registrada para 100k.
 - O ELT ainda e um esqueleto: usa schemas fixos, valida somente contagens e nao
   possui a interface nem as metricas completas do benchmark.
-- `src/benchmark.py` continua vazio; a orquestracao, a comparacao ETL x ELT e a
+- `src/enem/benchmark.py` continua vazio; a orquestracao, a comparacao ETL x ELT e a
   analise dos resultados ainda nao foram implementadas.
 - A base TSE esta presente em `data/raw`, mas ainda nao existe pipeline TSE em
   `src/`; ela deve ficar para depois da validacao completa do ENEM.
@@ -195,7 +195,7 @@
 
 ## Acoplamento inicial do benchmark ao ELT
 
-- `src/elt/enem/enem_elt.py` passou a aceitar schemas RAW/final configuraveis.
+- `src/enem/elt.py` passou a aceitar schemas RAW/final configuraveis.
 - Adicionadas as opcoes `--benchmark`, `--benchmark-output`,
   `--benchmark-summary-output`, `--rodada` e `--aquecimento`.
 - Adicionado registro estruturado das metricas de tempo, throughput, CPU e RAM
@@ -240,7 +240,7 @@
 
 ## Orquestrador rudimentar do benchmark
 
-- `src/benchmark.py` foi implementado para executar, por volume, um
+- `src/enem/benchmark.py` foi implementado para executar, por volume, um
   aquecimento e a quantidade configurada de rodadas ETL e ELT.
 - O script recebe volumes, quantidade de rodadas, diretorio de resultados e
   executavel Python por parametros.

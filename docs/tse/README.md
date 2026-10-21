@@ -10,13 +10,13 @@ Os manifestos determinam as chaves usadas igualmente pelo ETL e pelo ELT. Eles
 devem ser gerados antes das execucoes medidas:
 
 ```powershell
-python src\benchmark\tse\tse_preparar_subconjuntos.py
+python src\tse\preparar_subconjuntos.py
 ```
 
 Para preparar somente o piloto de 100 mil linhas:
 
 ```powershell
-python src\benchmark\tse\tse_preparar_subconjuntos.py --volumes 100000
+python src\tse\preparar_subconjuntos.py --volumes 100000
 ```
 
 ## ETL
@@ -27,14 +27,14 @@ O schema final é configurado por `POSTGRES_SCHEMA_TSE_ETL_FINAL` e usa
 Validação sem carga no PostgreSQL:
 
 ```powershell
-python src\etl\tse\tse_etl.py --limite 100000 --somente-validar `
+python src\tse\etl.py --limite 100000 --somente-validar `
   --manifesto-chaves data\benchmark\tse\subconjuntos\chaves_100000.csv
 ```
 
 Execução com carga e registro das métricas:
 
 ```powershell
-python src\etl\tse\tse_etl.py --limite 100000 `
+python src\tse\etl.py --limite 100000 `
   --manifesto-chaves data\benchmark\tse\subconjuntos\chaves_100000.csv `
   --benchmark --sem-validacao --rodada 1
 ```
@@ -52,14 +52,14 @@ em `tse_elt_staging` e consolidadas em
 Execução do piloto:
 
 ```powershell
-python src\elt\tse\tse_elt.py --limite 100000 `
+python src\tse\elt.py --limite 100000 `
   --manifesto-chaves data\benchmark\tse\subconjuntos\chaves_100000.csv
 ```
 
 Execução com registro das métricas:
 
 ```powershell
-python src\elt\tse\tse_elt.py --limite 100000 `
+python src\tse\elt.py --limite 100000 `
   --manifesto-chaves data\benchmark\tse\subconjuntos\chaves_100000.csv `
   --benchmark --sem-validacao --rodada 1
 ```
@@ -79,7 +79,7 @@ desempenho. Depois da certificação, as rodadas oficiais usam
 Depois de executar ETL e ELT com o mesmo manifesto:
 
 ```powershell
-python src\validacao\tse\tse_equivalencia.py
+python src\tse\equivalencia.py
 ```
 
 A verificação compara estrutura, tipos, nulabilidade, quantidade de linhas e

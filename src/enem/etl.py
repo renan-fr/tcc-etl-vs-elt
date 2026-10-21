@@ -117,7 +117,7 @@ def limpar_relatorio_valores_desconhecidos() -> None:
 # CONFIGURAÇÕES
 # -------------
 
-BASE_DIR = Path(__file__).resolve().parents[3]
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 PASTA_ENEM = (
     BASE_DIR
