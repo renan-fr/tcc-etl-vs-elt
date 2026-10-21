@@ -249,5 +249,10 @@ enem_elt_final.participantes
 enem_elt_final.resultados
 ```
 
+A camada `enem_elt_raw` armazenará somente as colunas pertencentes ao extrato
+experimental, exatamente as mesmas lidas pelo ETL. A projeção de colunas faz
+parte da extração comum aos dois pipelines; conversões, regras de negócio e
+campos derivados continuam sendo executados somente depois da carga no ELT.
+
 A equivalência final será verificada entre as tabelas de mesmo nome nos
 schemas `enem_etl_final` e `enem_elt_final`.

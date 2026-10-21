@@ -4,12 +4,12 @@ import argparse
 import csv
 from dataclasses import dataclass
 from datetime import datetime
-from io import TextIOWrapper
+from io import StringIO
 import os
 from pathlib import Path
-import tempfile
 import threading
 import time
+from typing import Iterator
 
 import psycopg2
 import psutil
@@ -284,11 +284,6 @@ def obter_conexao(database_url: str | None = None):
     )
 
 
-def ler_cabecalho(caminho: Path) -> list[str]:
-    with caminho.open("r", encoding="latin-1", newline="") as arquivo:
-        return next(csv.reader(arquivo, delimiter=";"))
-
-
 def criar_tabela_raw(cursor, schema: str, tabela: str, colunas: list[str]) -> None:
     cursor.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {};").format(sql.Identifier(schema)))
     cursor.execute(
@@ -306,60 +301,111 @@ def criar_tabela_raw(cursor, schema: str, tabela: str, colunas: list[str]) -> No
     )
 
 
+class FluxoCSVProjetado:
+    """Projeta as colunas do experimento e entrega o CSV ao COPY em blocos."""
+
+    def __init__(
+        self,
+        caminho: Path,
+        colunas: list[str],
+        limite: int | None,
+        linhas_por_bloco: int = 4_096,
+    ) -> None:
+        self._caminho = caminho
+        self._colunas = colunas
+        self._limite = limite
+        self._linhas_por_bloco = linhas_por_bloco
+        self._blocos = self._gerar_blocos()
+        self._pendente = ""
+        self.linhas = 0
+        self.tempo_leitura = 0.0
+
+    def read(self, tamanho: int = -1) -> str:
+        if tamanho is None or tamanho < 0:
+            tamanho = 64 * 1024
+        while len(self._pendente) < tamanho:
+            try:
+                self._pendente += next(self._blocos)
+            except StopIteration:
+                break
+        resultado = self._pendente[:tamanho]
+        self._pendente = self._pendente[tamanho:]
+        return resultado
+
+    def _iterar_linhas(self) -> Iterator[list[str]]:
+        with self._caminho.open("r", encoding="latin-1", newline="") as arquivo:
+            leitor = csv.DictReader(arquivo, delimiter=";")
+            presentes = set(leitor.fieldnames or [])
+            faltantes = sorted(set(self._colunas) - presentes)
+            if faltantes:
+                raise ValueError(
+                    f"{self._caminho.name} sem colunas obrigatorias: "
+                    + ", ".join(faltantes)
+                )
+
+            for numero, linha in enumerate(leitor):
+                if self._limite is not None and numero >= self._limite:
+                    break
+                yield [(linha.get(coluna) or "") for coluna in self._colunas]
+
+    def _gerar_blocos(self) -> Iterator[str]:
+        cabecalho = StringIO()
+        csv.writer(
+            cabecalho,
+            delimiter=";",
+            lineterminator="\n",
+        ).writerow(self._colunas)
+        yield cabecalho.getvalue()
+
+        linhas = self._iterar_linhas()
+        finalizado = False
+        while not finalizado:
+            inicio = time.perf_counter()
+            buffer = StringIO()
+            escritor = csv.writer(
+                buffer,
+                delimiter=";",
+                lineterminator="\n",
+            )
+            quantidade = 0
+            for _ in range(self._linhas_por_bloco):
+                try:
+                    escritor.writerow(next(linhas))
+                    quantidade += 1
+                except StopIteration:
+                    finalizado = True
+                    break
+            self.tempo_leitura += time.perf_counter() - inicio
+            if quantidade:
+                self.linhas += quantidade
+                yield buffer.getvalue()
+
+
 def carregar_csv_raw(
     cursor,
     caminho: Path,
     schema: str,
     tabela: str,
+    colunas: list[str],
     limite: int | None = None,
 ) -> tuple[int, float, float]:
     if limite is not None and limite < 0:
         raise ValueError("limite deve ser maior ou igual a zero.")
 
-    inicio_leitura = time.perf_counter()
-    colunas = ler_cabecalho(caminho)
-    if limite is None:
-        arquivo = caminho.open("r", encoding="latin-1", newline="")
-        arquivo_temporario = None
-    else:
-        arquivo_temporario = tempfile.NamedTemporaryFile(
-            mode="w+", encoding="utf-8", newline="", suffix=".csv"
-        )
-        escritor = csv.writer(arquivo_temporario, delimiter=";", lineterminator="\n")
-        with caminho.open("r", encoding="latin-1", newline="") as origem:
-            leitor = csv.reader(origem, delimiter=";")
-            escritor.writerow(next(leitor))
-            for numero, linha in enumerate(leitor):
-                if numero >= limite:
-                    break
-                escritor.writerow(linha)
-        arquivo_temporario.flush()
-        arquivo_temporario.seek(0)
-        arquivo = arquivo_temporario
-    tempo_leitura = time.perf_counter() - inicio_leitura
-
-    inicio_carga = time.perf_counter()
-    try:
-        cursor.copy_expert(
-            sql.SQL("COPY {}.{} ({}) FROM STDIN WITH (FORMAT CSV, HEADER TRUE, DELIMITER ';', NULL '')").format(
-                sql.Identifier(schema),
-                sql.Identifier(tabela),
-                sql.SQL(", ").join(sql.Identifier(coluna) for coluna in colunas),
-            ).as_string(cursor),
-            arquivo,
-        )
-    finally:
-        arquivo.close()
-        if arquivo_temporario is not None:
-            arquivo_temporario.close()
-
-    cursor.execute(
-        sql.SQL("SELECT COUNT(*) FROM {}.{};").format(
-            sql.Identifier(schema), sql.Identifier(tabela)
-        )
+    fluxo = FluxoCSVProjetado(caminho, colunas, limite)
+    inicio_total = time.perf_counter()
+    cursor.copy_expert(
+        sql.SQL("COPY {}.{} ({}) FROM STDIN WITH (FORMAT CSV, HEADER TRUE, DELIMITER ';', NULL '')").format(
+            sql.Identifier(schema),
+            sql.Identifier(tabela),
+            sql.SQL(", ").join(sql.Identifier(coluna) for coluna in colunas),
+        ).as_string(cursor),
+        fluxo,
     )
-    quantidade = int(cursor.fetchone()[0])
-    return quantidade, tempo_leitura, time.perf_counter() - inicio_carga
+    tempo_total = time.perf_counter() - inicio_total
+
+    tempo_carga = max(0.0, tempo_total - fluxo.tempo_leitura)
+    return fluxo.linhas, fluxo.tempo_leitura, tempo_carga
 
 
 def _case(coluna: str, mapa: dict[str, str], desconhecido: str = "Não informado") -> str:
@@ -853,19 +899,30 @@ def executar_elt(
         with conexao.cursor() as cursor:
             inicio_carga_raw = time.perf_counter()
             inicio = time.perf_counter()
-            criar_tabela_raw(cursor, schema_raw, TABELA_RAW_PARTICIPANTES, ler_cabecalho(CAMINHO_PARTICIPANTES))
-            criar_tabela_raw(cursor, schema_raw, TABELA_RAW_RESULTADOS, ler_cabecalho(CAMINHO_RESULTADOS))
+            criar_tabela_raw(
+                cursor,
+                schema_raw,
+                TABELA_RAW_PARTICIPANTES,
+                COLUNAS_PARTICIPANTES,
+            )
+            criar_tabela_raw(
+                cursor,
+                schema_raw,
+                TABELA_RAW_RESULTADOS,
+                COLUNAS_RESULTADOS,
+            )
             linhas_raw_participantes, leitura_participantes, _ = carregar_csv_raw(
                 cursor, CAMINHO_PARTICIPANTES, schema_raw,
-                TABELA_RAW_PARTICIPANTES, limite,
+                TABELA_RAW_PARTICIPANTES, COLUNAS_PARTICIPANTES, limite,
             )
             linhas_raw_resultados, leitura_resultados, _ = carregar_csv_raw(
                 cursor, CAMINHO_RESULTADOS, schema_raw,
-                TABELA_RAW_RESULTADOS, limite,
+                TABELA_RAW_RESULTADOS, COLUNAS_RESULTADOS, limite,
             )
             conexao.commit()
             tempo_leitura = leitura_participantes + leitura_resultados
-            tempo_raw = time.perf_counter() - inicio_carga_raw
+            tempo_raw_total = time.perf_counter() - inicio_carga_raw
+            tempo_raw = max(0.0, tempo_raw_total - tempo_leitura)
 
             inicio = time.perf_counter()
             transformar_participantes_sql(cursor, schema_raw, schema_final)

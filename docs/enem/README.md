@@ -45,8 +45,11 @@ Execução com carga e registro das métricas:
 
 ## ELT
 
-O ELT carrega os arquivos como texto em `enem_elt_raw` e cria as tabelas
-processadas em `enem_elt_final` por meio de transformações SQL.
+O ELT projeta o mesmo conjunto de colunas utilizado pelo ETL e o carrega como
+texto em `enem_elt_raw`. Essa camada representa o extrato bruto do experimento,
+não uma réplica integral dos CSVs. Conversões de tipo, mapeamentos, tratamentos
+e cálculos permanecem posteriores à carga e criam as tabelas processadas em
+`enem_elt_final` por meio de transformações SQL.
 
 Execução com carga e registro das métricas:
 
