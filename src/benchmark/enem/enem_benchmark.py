@@ -26,36 +26,39 @@ def executar_cenario(
     aquecimento: bool,
     diretorio_resultados: Path,
     diretorio_resumos: Path,
+    certificar: bool = False,
 ) -> None:
-    marcador = "aquecimento" if aquecimento else f"rodada_{rodada}"
+    marcador = (
+        "certificacao"
+        if certificar
+        else "aquecimento" if aquecimento else f"rodada_{rodada}"
+    )
     print(f"\n=== ENEM | volume={volume} | {marcador} ===")
 
-    argumentos_comuns = [
-        "--limite", str(volume),
-        "--benchmark",
-    ]
-    if aquecimento:
-        argumentos_comuns.append("--aquecimento")
-    else:
-        argumentos_comuns.extend(["--rodada", str(rodada)])
+    argumentos_comuns = ["--limite", str(volume)]
+    if not certificar:
+        argumentos_comuns.extend(["--benchmark", "--sem-validacao"])
+        if aquecimento:
+            argumentos_comuns.append("--aquecimento")
+        else:
+            argumentos_comuns.extend(["--rodada", str(rodada)])
 
-    executar([
-        python, str(ETL_SCRIPT),
-        *argumentos_comuns,
-        "--benchmark-output",
-        str(diretorio_resultados / "enem_etl.csv"),
-        "--benchmark-summary-output",
-        str(diretorio_resumos / "enem_etl.txt"),
-    ])
-    executar([
-        python, str(ELT_SCRIPT),
-        *argumentos_comuns,
-        "--benchmark-output",
-        str(diretorio_resultados / "enem_elt.csv"),
-        "--benchmark-summary-output",
-        str(diretorio_resumos / "enem_elt.txt"),
-    ])
-    executar([python, str(EQUIVALENCIA_SCRIPT)])
+    comando_etl = [python, str(ETL_SCRIPT), *argumentos_comuns]
+    comando_elt = [python, str(ELT_SCRIPT), *argumentos_comuns]
+    if not certificar:
+        comando_etl.extend([
+            "--benchmark-output", str(diretorio_resultados / "enem_etl.csv"),
+            "--benchmark-summary-output", str(diretorio_resumos / "enem_etl.txt"),
+        ])
+        comando_elt.extend([
+            "--benchmark-output", str(diretorio_resultados / "enem_elt.csv"),
+            "--benchmark-summary-output", str(diretorio_resumos / "enem_elt.txt"),
+        ])
+
+    executar(comando_etl)
+    executar(comando_elt)
+    if certificar:
+        executar([python, str(EQUIVALENCIA_SCRIPT)])
 
 
 def main() -> None:
@@ -86,6 +89,14 @@ def main() -> None:
         default=sys.executable,
         help="Executável Python usado pelos pipelines.",
     )
+    parser.add_argument(
+        "--certificar",
+        action="store_true",
+        help=(
+            "Executa ETL, ELT e equivalência uma vez por volume, com validações "
+            "internas e sem registrar resultados de desempenho."
+        ),
+    )
     args = parser.parse_args()
 
     if args.rodadas < 1:
@@ -96,6 +107,20 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     diretorio_resumos = args.output_dir.parent / "resumos"
     diretorio_resumos.mkdir(parents=True, exist_ok=True)
+
+    if args.certificar:
+        for volume in args.volumes:
+            executar_cenario(
+                args.python,
+                volume,
+                None,
+                False,
+                args.output_dir,
+                diretorio_resumos,
+                certificar=True,
+            )
+        return
+
     for volume in args.volumes:
         executar_cenario(args.python, volume, None, True, args.output_dir, diretorio_resumos)
         for rodada in range(1, args.rodadas + 1):

@@ -105,7 +105,6 @@ No ETL:
 ```text
 tempo_leitura       = leitura dos dois arquivos
 tempo_transformacao = mapeamentos, conversões e regras derivadas em Python
-tempo_validacao     = validações críticas e alertas
 tempo_carga         = carga das duas tabelas finais no PostgreSQL
 tempo_total         = todo o pipeline, da leitura ao fim da carga
 ```
@@ -116,13 +115,14 @@ No ELT:
 tempo_leitura       = leitura e preparação dos dois arquivos
 tempo_carga         = criação e carga das tabelas raw
 tempo_transformacao = transformações SQL e criação das tabelas finais
-tempo_validacao     = validações SQL
 tempo_total         = todo o pipeline, da leitura ao fim das tabelas finais
 ```
 
 O throughput usará a soma das linhas efetivas dos dois arquivos dividida pelo
-tempo total. A comparação de equivalência será um pós-processamento e ficará
-fora do tempo principal.
+tempo total. Antes do benchmark, uma certificação executará as validações
+internas e a comparação de equivalência uma vez para cada volume oficial. Essas
+etapas não serão executadas nas rodadas de desempenho e ficarão fora do tempo,
+do monitoramento de recursos e das estatísticas oficiais.
 
 ## Contrato final de colunas
 

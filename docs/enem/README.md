@@ -38,7 +38,7 @@ Execução com carga e registro das métricas:
 
 ```powershell
 .venv\Scripts\python.exe src\etl\enem\enem_etl.py `
-  --limite 100000 --benchmark --rodada 1 `
+  --limite 100000 --benchmark --sem-validacao --rodada 1 `
   --benchmark-output data\benchmark\enem\resultados\enem_etl.csv `
   --benchmark-summary-output data\benchmark\enem\resumos\enem_etl.txt
 ```
@@ -52,7 +52,7 @@ Execução com carga e registro das métricas:
 
 ```powershell
 .venv\Scripts\python.exe src\elt\enem\enem_elt.py `
-  --limite 100000 --benchmark --rodada 1 `
+  --limite 100000 --benchmark --sem-validacao --rodada 1 `
   --benchmark-output data\benchmark\enem\resultados\enem_elt.csv `
   --benchmark-summary-output data\benchmark\enem\resumos\enem_elt.txt
 ```
@@ -68,14 +68,26 @@ O orquestrador específico do ENEM é:
 .venv\Scripts\python.exe src\benchmark\enem\enem_benchmark.py --rodadas 5
 ```
 
+Antes do primeiro benchmark, ou depois de qualquer alteração capaz de mudar o
+resultado dos pipelines, certifique todos os volumes:
+
+```powershell
+.venv\Scripts\python.exe src\benchmark\enem\enem_benchmark.py --certificar
+```
+
+A certificação executa ETL, ELT, validações internas e equivalência uma vez por
+volume. Ela não registra resultados de desempenho. A execução normal ignora as
+validações internas e a equivalência para medir somente leitura, transformação
+e carga.
+
 Para um teste reduzido:
 
 ```powershell
 .venv\Scripts\python.exe src\benchmark\enem\enem_benchmark.py --volumes 100000 --rodadas 1
 ```
 
-Depois de cada par ETL/ELT, o orquestrador executa automaticamente a validação
-de equivalência. Uma divergência interrompe o benchmark.
+O benchmark pressupõe que a versão atual de código, dados e parâmetros já foi
+certificada.
 
 ## Equivalência do produto final
 

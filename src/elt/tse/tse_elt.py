@@ -54,7 +54,7 @@ class ResultadoBenchmark:
     aquecimento: bool
     tempo_leitura: float
     tempo_transformacao: float
-    tempo_validacao: float
+    tempo_validacao: float | None
     tempo_carga: float
     tempo_total: float
     throughput: float
@@ -75,6 +75,7 @@ class ResultadoBenchmark:
     linhas_secao: int
     linhas_candidato: int
     linhas_processadas: int
+    validacao_executada: bool
     timestamp: str
 
 
@@ -816,6 +817,8 @@ def executar(args: argparse.Namespace) -> None:
     linhas_secao = len(fontes.secao)
     linhas_candidato = len(fontes.candidato)
 
+    tempo_validacao: float | None = None
+    validacao: ResultadoValidacao | None = None
     try:
         conexao_postgres = obter_conexao_postgres(args.database_url)
     except ValueError as erro:
@@ -840,21 +843,25 @@ def executar(args: argparse.Namespace) -> None:
                 conexao.commit()
                 tempo_transformacao = time.perf_counter() - inicio
 
-                inicio = time.perf_counter()
-                validacao = validar_produto(
-                    cursor, args.schema_staging, args.schema_final
-                )
-                tempo_validacao = time.perf_counter() - inicio
+                if not args.sem_validacao:
+                    inicio = time.perf_counter()
+                    validacao = validar_produto(
+                        cursor, args.schema_staging, args.schema_final
+                    )
+                    tempo_validacao = time.perf_counter() - inicio
     except (psycopg2.Error, UnicodeError, ValueError) as erro:
         if args.benchmark:
             monitor.parar()
         raise SystemExit(f"Falha no pipeline ELT do TSE: {erro}") from erro
 
-    _imprimir_validacao(validacao)
-    if not validacao.valido:
-        if args.benchmark:
-            monitor.parar()
-        raise SystemExit("Pipeline interrompido por erros criticos de validacao.")
+    if validacao is not None:
+        _imprimir_validacao(validacao)
+        if not validacao.valido:
+            if args.benchmark:
+                monitor.parar()
+            raise SystemExit("Pipeline interrompido por erros criticos de validacao.")
+    else:
+        print("Validacao interna ignorada (--sem-validacao).")
 
     tempo_total = time.perf_counter() - inicio_total
     print(f"Munzona: {linhas_munzona} linhas")
@@ -863,7 +870,10 @@ def executar(args: argparse.Namespace) -> None:
     print(f"Produto final: {linhas_processadas} linhas")
     print(f"Carga RAW: {tempo_carga:.3f}s")
     print(f"Transformacao SQL: {tempo_transformacao:.3f}s")
-    print(f"Validacao: {tempo_validacao:.3f}s")
+    if tempo_validacao is None:
+        print("Validacao: nao executada")
+    else:
+        print(f"Validacao: {tempo_validacao:.3f}s")
     print(f"Total: {tempo_total:.3f}s")
 
     if not args.benchmark:
@@ -888,6 +898,7 @@ def executar(args: argparse.Namespace) -> None:
         linhas_secao=linhas_secao,
         linhas_candidato=linhas_candidato,
         linhas_processadas=linhas_processadas,
+        validacao_executada=tempo_validacao is not None,
         timestamp=datetime.now().isoformat(timespec="seconds"),
         **recursos,
     )
@@ -933,6 +944,11 @@ def main() -> None:
         default=os.getenv("POSTGRES_SCHEMA_TSE_ELT_FINAL", SCHEMA_FINAL),
     )
     parser.add_argument("--benchmark", action="store_true")
+    parser.add_argument(
+        "--sem-validacao",
+        action="store_true",
+        help="Ignora validacoes internas no benchmark previamente certificado.",
+    )
     parser.add_argument("--rodada", type=int, default=None)
     parser.add_argument("--aquecimento", action="store_true")
     parser.add_argument("--manifesto-chaves", type=Path, default=None)

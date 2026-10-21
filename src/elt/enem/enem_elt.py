@@ -144,7 +144,7 @@ class TemposELT:
     leitura: float
     carga_raw: float
     transformacao_sql: float
-    validacao: float
+    validacao: float | None
     total: float
     linhas_participantes: int
     linhas_resultados: int
@@ -159,7 +159,7 @@ class ResultadoBenchmark:
     aquecimento: bool
     tempo_leitura: float
     tempo_transformacao: float
-    tempo_validacao: float
+    tempo_validacao: float | None
     tempo_carga: float
     tempo_total: float
     throughput: float
@@ -178,6 +178,7 @@ class ResultadoBenchmark:
     quantidade_registros: int
     linhas_participantes: int
     linhas_resultados: int
+    validacao_executada: bool
     timestamp: str
 
 
@@ -845,6 +846,7 @@ def executar_elt(
     limite: int | None,
     schema_raw: str = SCHEMA_RAW,
     schema_final: str = SCHEMA_FINAL,
+    validar: bool = True,
 ) -> TemposELT:
     inicio_total = time.perf_counter()
     with obter_conexao(database_url) as conexao:
@@ -871,22 +873,26 @@ def executar_elt(
             conexao.commit()
             tempo_sql = time.perf_counter() - inicio
 
-            inicio = time.perf_counter()
-            validacao_participantes = validar_participantes(
-                cursor, schema_final, linhas_raw_participantes
-            )
-            validacao_resultados = validar_resultados(
-                cursor, schema_final, linhas_raw_resultados
-            )
-            tempo_validacao = time.perf_counter() - inicio
-
-            _imprimir_validacao(validacao_participantes)
-            _imprimir_validacao(validacao_resultados)
-            erros = validacao_participantes.erros + validacao_resultados.erros
-            if erros:
-                raise ValueError(
-                    "Pipeline interrompido por erros críticos de validação."
+            tempo_validacao: float | None = None
+            if validar:
+                inicio = time.perf_counter()
+                validacao_participantes = validar_participantes(
+                    cursor, schema_final, linhas_raw_participantes
                 )
+                validacao_resultados = validar_resultados(
+                    cursor, schema_final, linhas_raw_resultados
+                )
+                tempo_validacao = time.perf_counter() - inicio
+
+                _imprimir_validacao(validacao_participantes)
+                _imprimir_validacao(validacao_resultados)
+                erros = validacao_participantes.erros + validacao_resultados.erros
+                if erros:
+                    raise ValueError(
+                        "Pipeline interrompido por erros críticos de validação."
+                    )
+            else:
+                print("Validação interna ignorada (--sem-validacao).")
 
             linhas_participantes = linhas_raw_participantes
             linhas_resultados = linhas_raw_resultados
@@ -935,6 +941,7 @@ def finalizar_benchmark(monitor, inicio_total, tempos, limite, rodada, aquecimen
         throughput=quantidade / tempo_total if tempo_total else 0.0,
         quantidade_registros=quantidade, linhas_participantes=tempos.linhas_participantes,
         linhas_resultados=tempos.linhas_resultados,
+        validacao_executada=tempos.validacao is not None,
         timestamp=datetime.now().isoformat(timespec="seconds"), **recursos,
     )
     salvar_benchmark(resultado, caminho_csv)
@@ -962,6 +969,11 @@ def main() -> None:
     parser.add_argument("--rodada", type=int, default=None)
     parser.add_argument("--aquecimento", action="store_true")
     parser.add_argument(
+        "--sem-validacao",
+        action="store_true",
+        help="Ignora validações internas no benchmark previamente certificado.",
+    )
+    parser.add_argument(
         "--limite",
         type=int,
         default=0,
@@ -977,7 +989,11 @@ def main() -> None:
     limite = None if args.limite == 0 else args.limite
     try:
         tempos = executar_elt(
-            args.database_url, limite, args.schema_raw, args.schema_final
+            args.database_url,
+            limite,
+            args.schema_raw,
+            args.schema_final,
+            validar=not args.sem_validacao,
         )
     except (psycopg2.Error, UnicodeError, ValueError) as erro:
         if args.benchmark:
@@ -986,7 +1002,10 @@ def main() -> None:
     print(f"Leitura/preparacao: {tempos.leitura:.3f}s")
     print(f"Carga RAW: {tempos.carga_raw:.3f}s")
     print(f"Transformação SQL: {tempos.transformacao_sql:.3f}s")
-    print(f"Validação: {tempos.validacao:.3f}s")
+    if tempos.validacao is None:
+        print("Validação: não executada")
+    else:
+        print(f"Validação: {tempos.validacao:.3f}s")
     print(f"Total: {tempos.total:.3f}s")
     if args.benchmark:
         finalizar_benchmark(

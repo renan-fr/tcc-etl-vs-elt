@@ -152,7 +152,7 @@ class ResultadoBenchmark:
     aquecimento: bool
     tempo_leitura: float
     tempo_transformacao: float
-    tempo_validacao: float
+    tempo_validacao: float | None
     tempo_carga: float
     tempo_total: float
     throughput: float
@@ -173,6 +173,7 @@ class ResultadoBenchmark:
     linhas_secao: int
     linhas_candidato: int
     linhas_processadas: int
+    validacao_executada: bool
     timestamp: str
 
 
@@ -804,14 +805,18 @@ def executar(args: argparse.Namespace) -> None:
     produto = construir_produto(munzona, secoes, candidatos)
     tempo_transformacao = time.perf_counter() - inicio
 
-    inicio = time.perf_counter()
-    validacao = validar_produto(produto, len(munzona), secoes, candidatos)
-    tempo_validacao = time.perf_counter() - inicio
-    _imprimir_validacao(validacao)
-    if not validacao.valido:
-        if args.benchmark:
-            monitor.parar()
-        raise SystemExit("Carga interrompida por erros criticos de validacao.")
+    tempo_validacao: float | None = None
+    if not args.sem_validacao:
+        inicio = time.perf_counter()
+        validacao = validar_produto(produto, len(munzona), secoes, candidatos)
+        tempo_validacao = time.perf_counter() - inicio
+        _imprimir_validacao(validacao)
+        if not validacao.valido:
+            if args.benchmark:
+                monitor.parar()
+            raise SystemExit("Carga interrompida por erros criticos de validacao.")
+    else:
+        print("Validacao interna ignorada (--sem-validacao).")
 
     tempo_carga = 0.0
     if not args.somente_validar:
@@ -863,6 +868,7 @@ def executar(args: argparse.Namespace) -> None:
         linhas_secao=len(fontes.secao),
         linhas_candidato=len(fontes.candidato),
         linhas_processadas=len(produto),
+        validacao_executada=tempo_validacao is not None,
         timestamp=datetime.now().isoformat(timespec="seconds"),
         **recursos,
     )
@@ -901,6 +907,11 @@ def main() -> None:
     )
     parser.add_argument("--somente-validar", action="store_true")
     parser.add_argument("--benchmark", action="store_true")
+    parser.add_argument(
+        "--sem-validacao",
+        action="store_true",
+        help="Ignora validacoes internas no benchmark previamente certificado.",
+    )
     parser.add_argument("--rodada", type=int, default=None)
     parser.add_argument("--aquecimento", action="store_true")
     parser.add_argument("--manifesto-chaves", type=Path, default=None)

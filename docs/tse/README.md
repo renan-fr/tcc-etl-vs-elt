@@ -36,7 +36,7 @@ Execução com carga e registro das métricas:
 ```powershell
 python src\etl\tse\tse_etl.py --limite 100000 `
   --manifesto-chaves data\benchmark\tse\subconjuntos\chaves_100000.csv `
-  --benchmark --rodada 1
+  --benchmark --sem-validacao --rodada 1
 ```
 
 O throughput usa a soma das linhas efetivas de `munzona`, seção e candidato.
@@ -61,8 +61,18 @@ Execução com registro das métricas:
 ```powershell
 python src\elt\tse\tse_elt.py --limite 100000 `
   --manifesto-chaves data\benchmark\tse\subconjuntos\chaves_100000.csv `
-  --benchmark --rodada 1
+  --benchmark --sem-validacao --rodada 1
 ```
+
+## Certificação antes do benchmark
+
+Antes das rodadas de desempenho, execute ETL e ELT sem `--sem-validacao` para
+manter as validações internas ativas. Em seguida, execute a equivalência com o
+mesmo volume e manifesto. Repita esse processo uma vez para cada volume oficial.
+
+As execuções de certificação não devem ser registradas como resultados de
+desempenho. Depois da certificação, as rodadas oficiais usam
+`--sem-validacao` e não repetem a equivalência.
 
 ## Equivalência do produto final
 

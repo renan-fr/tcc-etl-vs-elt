@@ -41,7 +41,7 @@ class ResultadoBenchmark:
     aquecimento: bool
     tempo_leitura: float
     tempo_transformacao: float
-    tempo_validacao: float
+    tempo_validacao: float | None
     tempo_carga: float
     tempo_total: float
     throughput: float
@@ -60,6 +60,7 @@ class ResultadoBenchmark:
     quantidade_registros: int
     linhas_participantes: int
     linhas_resultados: int
+    validacao_executada: bool
     timestamp: str
 
 
@@ -1143,7 +1144,11 @@ def _linhas_resumo_benchmark(resultado: ResultadoBenchmark) -> list[str]:
         f"Linhas resultados: {resultado.linhas_resultados}",
         f"Tempo leitura: {resultado.tempo_leitura:.3f}s",
         f"Tempo transformacao: {resultado.tempo_transformacao:.3f}s",
-        f"Tempo validacao: {resultado.tempo_validacao:.3f}s",
+        "Tempo validacao: " + (
+            f"{resultado.tempo_validacao:.3f}s"
+            if resultado.tempo_validacao is not None
+            else "nao executada"
+        ),
         f"Tempo carga: {resultado.tempo_carga:.3f}s",
         f"Tempo total: {resultado.tempo_total:.3f}s",
         f"Throughput: {resultado.throughput:.2f} registros/s",
@@ -1181,7 +1186,7 @@ def _finalizar_benchmark(
     inicio_total: float,
     tempo_leitura: float,
     tempo_transformacao: float,
-    tempo_validacao: float,
+    tempo_validacao: float | None,
     tempo_carga: float,
     limite: int | None,
     linhas_participantes: int,
@@ -1214,6 +1219,7 @@ def _finalizar_benchmark(
         quantidade_registros=quantidade_registros,
         linhas_participantes=linhas_participantes,
         linhas_resultados=linhas_resultados,
+        validacao_executada=tempo_validacao is not None,
         timestamp=datetime.now().isoformat(timespec="seconds"),
         **recursos,
     )
@@ -1238,6 +1244,7 @@ def main(
     benchmark_summary_output: Path | None = None,
     rodada: int | None = None,
     aquecimento: bool = False,
+    validar: bool = True,
 ) -> None:
     inicio_total = time.perf_counter()
     monitor = MonitorRecursos()
@@ -1266,25 +1273,29 @@ def main(
         print("Valores desconhecidos:")
         print(desconhecidos.to_string(index=False))
 
-    inicio = time.perf_counter()
-    validacao_participantes = validar_participantes(
-        participantes_tratados,
-        linhas_origem=len(participantes),
-    )
-    validacao_resultados = validar_resultados(
-        resultados_tratados,
-        linhas_origem=len(resultados),
-    )
-    tempo_validacao = time.perf_counter() - inicio
+    tempo_validacao: float | None = None
+    if validar:
+        inicio = time.perf_counter()
+        validacao_participantes = validar_participantes(
+            participantes_tratados,
+            linhas_origem=len(participantes),
+        )
+        validacao_resultados = validar_resultados(
+            resultados_tratados,
+            linhas_origem=len(resultados),
+        )
+        tempo_validacao = time.perf_counter() - inicio
 
-    _imprimir_validacao(validacao_participantes)
-    _imprimir_validacao(validacao_resultados)
+        _imprimir_validacao(validacao_participantes)
+        _imprimir_validacao(validacao_resultados)
 
-    erros = validacao_participantes.erros + validacao_resultados.erros
-    if erros:
-        if benchmark:
-            monitor.parar()
-        raise SystemExit("Carga interrompida por erros críticos de validação.")
+        erros = validacao_participantes.erros + validacao_resultados.erros
+        if erros:
+            if benchmark:
+                monitor.parar()
+            raise SystemExit("Carga interrompida por erros críticos de validação.")
+    else:
+        print("Validação interna ignorada (--sem-validacao).")
 
     if somente_validar:
         print("Carga ignorada (--somente-validar).")
@@ -1395,6 +1406,12 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--sem-validacao",
+        action="store_true",
+        help="Ignora validações internas no benchmark previamente certificado.",
+    )
+
+    parser.add_argument(
         "--benchmark-output",
         type=Path,
         default=BASE_DIR / "data" / "benchmark" / "enem" / "resultados" / "enem_etl.csv",
@@ -1438,4 +1455,5 @@ if __name__ == "__main__":
         ),
         rodada=args.rodada,
         aquecimento=args.aquecimento,
+        validar=not args.sem_validacao,
     )

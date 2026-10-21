@@ -413,6 +413,11 @@ A principal métrica será:
 
 Ela representará o tempo necessário para levar o dado desde sua origem até o resultado final pronto para utilização.
 
+As validações de qualidade e a equivalência entre ETL e ELT serão executadas em
+uma etapa prévia de certificação. O benchmark oficial medirá somente leitura,
+transformação e carga. Isso evita que verificações auxiliares interfiram no
+tempo, no uso de recursos e no estado de cache das rodadas de desempenho.
+
 ### Tempos por etapa
 
 Também serão registrados separadamente:
@@ -694,7 +699,6 @@ rodada
 aquecimento
 tempo_leitura
 tempo_transformacao
-tempo_validacao
 tempo_carga
 tempo_total
 throughput
@@ -703,6 +707,7 @@ cpu_pico
 ram_media
 ram_pico
 quantidade_registros_total
+validacao_executada
 timestamp
 ```
 
@@ -721,7 +726,6 @@ rodada
 aquecimento
 tempo_leitura
 tempo_transformacao
-tempo_validacao
 tempo_carga
 tempo_total
 throughput
@@ -729,6 +733,7 @@ cpu_media
 cpu_pico
 ram_media
 ram_pico
+validacao_executada
 timestamp
 ```
 

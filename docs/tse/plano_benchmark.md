@@ -174,7 +174,6 @@ No ETL:
 ```text
 tempo_leitura       = leitura dos arquivos e selecao do subconjunto
 tempo_transformacao = staging, agregacoes, ranking, joins e indicadores
-tempo_validacao     = validacoes criticas e alertas
 tempo_carga         = carga da tabela processed no PostgreSQL
 tempo_total         = todo o pipeline, da leitura ao fim da carga
 ```
@@ -185,14 +184,15 @@ No ELT:
 tempo_leitura       = preparacao da selecao dos arquivos e subconjunto
 tempo_carga         = carga dos arquivos na camada raw
 tempo_transformacao = staging SQL, agregacoes, ranking, joins e processed
-tempo_validacao     = validacoes SQL
 tempo_total         = todo o pipeline, da preparacao ao fim da processed
 ```
 
-A verificacao de equivalencia entre ETL e ELT sera executada como
-pos-processamento e ficara fora do tempo principal. `tempo_total` sera a metrica
-principal; as demais serao utilizadas para explicar o comportamento de cada
-abordagem.
+Antes do benchmark, uma certificacao executara as validacoes internas e a
+verificacao de equivalencia entre ETL e ELT uma vez para cada volume oficial.
+Essas etapas nao serao executadas nas rodadas de desempenho e ficarao fora do
+tempo, do monitoramento de recursos e das estatisticas oficiais. `tempo_total`
+sera a metrica principal; as demais serao utilizadas para explicar o
+comportamento de cada abordagem.
 
 ## Contrato final de colunas
 
