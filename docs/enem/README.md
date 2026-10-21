@@ -1,113 +1,58 @@
 # Benchmark ETL x ELT — ENEM
 
-Este documento descreve a preparação e a execução do benchmark do ENEM. O
-contrato do produto está em [plano_benchmark.md](plano_benchmark.md), e o
+O contrato do produto está em [plano_benchmark.md](plano_benchmark.md), e o
 protocolo comum está em [docs/metodologia.md](../metodologia.md).
 
-## Preparação dos dados
+## Preparação
 
-Na raiz do projeto:
-
-```powershell
-.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
-
-Configure o PostgreSQL no `.env` e mantenha os arquivos em:
+Instale as dependências, configure o PostgreSQL no `.env` e mantenha os
+arquivos do ENEM em:
 
 ```text
 data/raw/enem/microdados_enem_2024/DADOS/
 ```
 
-Os schemas usados por padrão são configurados por
-`POSTGRES_SCHEMA_ENEM_ETL_FINAL`, `POSTGRES_SCHEMA_ENEM_ELT_RAW` e
-`POSTGRES_SCHEMA_ENEM_ELT_FINAL`.
+## Certificação
 
-O mesmo limite deve ser usado nos dois pipelines. No ENEM, o volume é aplicado
-separadamente a `PARTICIPANTES_2024.csv` e `RESULTADOS_2024.csv`.
-
-## ETL
-
-Validação sem carga no PostgreSQL:
+A certificação executa ETL e ELT com validações internas e compara os produtos
+finais. Ela deve ser repetida depois de qualquer alteração que possa mudar os
+resultados:
 
 ```powershell
-.venv\Scripts\python.exe src\enem\etl.py `
-  --limite 100000 --somente-validar
+python src\enem\benchmark.py --certificar
 ```
 
-Execução com carga e registro das métricas:
+Para certificar apenas o piloto:
 
 ```powershell
-.venv\Scripts\python.exe src\enem\etl.py `
-  --limite 100000 --benchmark --sem-validacao --rodada 1 `
-  --benchmark-output data\benchmark\enem\resultados\enem_etl.csv `
-  --benchmark-summary-output data\benchmark\enem\resumos\enem_etl.txt
+python src\enem\benchmark.py --certificar --volumes 100000
 ```
 
-## ELT
+## Benchmark
 
-O ELT projeta o mesmo conjunto de colunas utilizado pelo ETL e o carrega como
-texto em `enem_elt_raw`. Essa camada representa o extrato bruto do experimento,
-não uma réplica integral dos CSVs. Conversões de tipo, mapeamentos, tratamentos
-e cálculos permanecem posteriores à carga e criam as tabelas processadas em
-`enem_elt_final` por meio de transformações SQL.
-
-Execução com carga e registro das métricas:
+O comando padrão executa um aquecimento e cinco rodadas válidas por volume:
 
 ```powershell
-.venv\Scripts\python.exe src\enem\elt.py `
-  --limite 100000 --benchmark --sem-validacao --rodada 1 `
-  --benchmark-output data\benchmark\enem\resultados\enem_elt.csv `
-  --benchmark-summary-output data\benchmark\enem\resumos\enem_elt.txt
+python src\enem\benchmark.py
 ```
-
-Use `--aquecimento` para a execução preliminar e repita com `--rodada 1` até
-`--rodada 5` nas execuções válidas.
-
-## Orquestração
-
-O orquestrador específico do ENEM é:
-
-```powershell
-.venv\Scripts\python.exe src\enem\benchmark.py --rodadas 5
-```
-
-Antes do primeiro benchmark, ou depois de qualquer alteração capaz de mudar o
-resultado dos pipelines, certifique todos os volumes:
-
-```powershell
-.venv\Scripts\python.exe src\enem\benchmark.py --certificar
-```
-
-A certificação executa ETL, ELT, validações internas e equivalência uma vez por
-volume. Ela não registra resultados de desempenho. A execução normal ignora as
-validações internas e a equivalência para medir somente leitura, transformação
-e carga.
 
 Para um teste reduzido:
 
 ```powershell
-.venv\Scripts\python.exe src\enem\benchmark.py --volumes 100000 --rodadas 1
+python src\enem\benchmark.py --volumes 100000 --rodadas 1
 ```
 
-O benchmark pressupõe que a versão atual de código, dados e parâmetros já foi
-certificada.
+Os únicos parâmetros do experimento são:
 
-## Equivalência do produto final
+- `--volumes`: quantidades máximas de linhas por arquivo;
+- `--rodadas`: repetições válidas por volume;
+- `--certificar`: executa validações e equivalência em vez de medir desempenho.
 
-Após executar ETL e ELT com o mesmo volume:
-
-```powershell
-.venv\Scripts\python.exe src\enem\equivalencia.py `
-  --schema-etl enem_etl_final --schema-elt enem_elt_final
-```
-
-O resultado só deve ser utilizado na análise de desempenho quando as tabelas
-`participantes` e `resultados` dos schemas finais forem equivalentes.
-
-## Resultados
+Conexão e schemas são obtidos do `.env`. Os pipelines são chamados pelo
+orquestrador e não precisam de configuração manual. O aquecimento não é gravado;
+somente as rodadas válidas são adicionadas aos CSVs:
 
 ```text
 data/benchmark/enem/resultados/enem_etl.csv
 data/benchmark/enem/resultados/enem_elt.csv
-data/benchmark/enem/resumos/
 ```

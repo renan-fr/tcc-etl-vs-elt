@@ -100,10 +100,8 @@ class ResultadoBenchmark:
     volume_configurado: int | None
     arquitetura: str
     rodada: int | None
-    aquecimento: bool
     tempo_leitura: float
     tempo_transformacao: float
-    tempo_validacao: float | None
     tempo_carga: float
     tempo_total: float
     throughput: float
@@ -124,7 +122,6 @@ class ResultadoBenchmark:
     linhas_secao: int
     linhas_candidato: int
     linhas_processadas: int
-    validacao_executada: bool
     timestamp: str
 
 
@@ -767,29 +764,25 @@ def executar(args: argparse.Namespace) -> None:
                 monitor.parar()
             raise SystemExit("Carga interrompida por erros criticos de validacao.")
     else:
-        print("Validacao interna ignorada (--sem-validacao).")
+        print("Validacao interna ignorada no modo de desempenho.")
 
-    tempo_carga = 0.0
-    if not args.somente_validar:
-        try:
-            conexao = obter_conexao_postgres(args.database_url)
-        except ValueError as erro:
-            if args.benchmark:
-                monitor.parar()
-            raise SystemExit(str(erro)) from erro
-        inicio = time.perf_counter()
-        try:
-            carregar_produto(produto, conexao, args.schema)
-        except (psycopg2.Error, UnicodeError) as erro:
-            if args.benchmark:
-                monitor.parar()
-            raise SystemExit(
-                f"Falha ao conectar ou carregar no PostgreSQL: {erro}"
-            ) from erro
-        tempo_carga = time.perf_counter() - inicio
-        print(f"Carga concluida: {args.schema}.{TABELA_FINAL}.")
-    else:
-        print("Carga ignorada (--somente-validar).")
+    try:
+        conexao = obter_conexao_postgres(args.database_url)
+    except ValueError as erro:
+        if args.benchmark:
+            monitor.parar()
+        raise SystemExit(str(erro)) from erro
+    inicio = time.perf_counter()
+    try:
+        carregar_produto(produto, conexao, args.schema)
+    except (psycopg2.Error, UnicodeError) as erro:
+        if args.benchmark:
+            monitor.parar()
+        raise SystemExit(
+            f"Falha ao conectar ou carregar no PostgreSQL: {erro}"
+        ) from erro
+    tempo_carga = time.perf_counter() - inicio
+    print(f"Carga concluida: {args.schema}.{TABELA_FINAL}.")
 
     print(f"Munzona: {len(fontes.munzona)} linhas")
     print(f"Secao: {len(fontes.secao)} linhas")
@@ -807,10 +800,8 @@ def executar(args: argparse.Namespace) -> None:
         volume_configurado=args.limite,
         arquitetura="etl",
         rodada=args.rodada,
-        aquecimento=args.aquecimento,
         tempo_leitura=tempo_leitura,
         tempo_transformacao=tempo_transformacao,
-        tempo_validacao=tempo_validacao,
         tempo_carga=tempo_carga,
         tempo_total=tempo_total,
         throughput=quantidade / tempo_total if tempo_total else 0.0,
@@ -819,7 +810,6 @@ def executar(args: argparse.Namespace) -> None:
         linhas_secao=len(fontes.secao),
         linhas_candidato=len(fontes.candidato),
         linhas_processadas=len(produto),
-        validacao_executada=tempo_validacao is not None,
         timestamp=datetime.now().isoformat(timespec="seconds"),
         **recursos,
     )
@@ -831,55 +821,47 @@ def executar(args: argparse.Namespace) -> None:
     if args.benchmark_output:
         _salvar_benchmark(resultado, args.benchmark_output)
         print(f"Resultado salvo em: {args.benchmark_output}")
-    if args.benchmark_summary_output:
-        args.benchmark_summary_output.parent.mkdir(parents=True, exist_ok=True)
-        with args.benchmark_summary_output.open("a", encoding="utf-8") as arquivo:
-            arquivo.write(
-                f"Benchmark ETL TSE | volume={args.limite or 'todos'} | "
-                f"total={tempo_total:.3f}s | registros={quantidade} | "
-                f"processadas={len(produto)} | "
-                f"throughput={resultado.throughput:.2f}\n"
-            )
-
-
 def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(description="Pipeline ETL do TSE 2024")
+    parser.add_argument("--limite", type=int, required=True)
     parser.add_argument(
-        "--limite",
-        type=int,
-        default=0,
-        help="Volume nominal de linhas da fonte de secao; use 0 para todas.",
+        "--modo",
+        choices=["certificar", "aquecimento", "medir"],
+        required=True,
     )
-    parser.add_argument("--database-url", default=os.getenv("DATABASE_URL"))
-    parser.add_argument(
-        "--schema",
-        default=os.getenv("POSTGRES_SCHEMA_TSE_ETL_FINAL", "tse_etl_final"),
-    )
-    parser.add_argument("--somente-validar", action="store_true")
-    parser.add_argument("--benchmark", action="store_true")
-    parser.add_argument(
-        "--sem-validacao",
-        action="store_true",
-        help="Ignora validacoes internas no benchmark previamente certificado.",
-    )
-    parser.add_argument("--rodada", type=int, default=None)
-    parser.add_argument("--aquecimento", action="store_true")
-    parser.add_argument("--manifesto-chaves", type=Path, default=None)
-    parser.add_argument(
-        "--benchmark-output",
-        type=Path,
-        default=BASE_DIR / "data" / "benchmark" / "tse" / "resultados" / "tse_etl.csv",
-    )
-    parser.add_argument(
-        "--benchmark-summary-output",
-        type=Path,
-        default=BASE_DIR / "data" / "benchmark" / "tse" / "resumos" / "tse_etl.txt",
-    )
+    parser.add_argument("--rodada", type=int)
     args = parser.parse_args()
-    if args.limite < 0:
-        parser.error("--limite deve ser maior ou igual a zero.")
-    args.limite = None if args.limite == 0 else args.limite
+    if args.limite < 1:
+        parser.error("--limite deve ser maior que zero.")
+    if args.modo == "medir" and args.rodada is None:
+        parser.error("--rodada e obrigatoria no modo medir.")
+    if args.modo != "medir" and args.rodada is not None:
+        parser.error("--rodada so pode ser usada no modo medir.")
+
+    args.manifesto_chaves = (
+        BASE_DIR
+        / "data"
+        / "benchmark"
+        / "tse"
+        / "subconjuntos"
+        / f"chaves_{args.limite}.csv"
+    )
+    if not args.manifesto_chaves.is_file():
+        parser.error(
+            f"Manifesto ausente: {args.manifesto_chaves}. "
+            "Prepare-o com src/tse/preparar_subconjuntos.py."
+        )
+
+    args.database_url = os.getenv("DATABASE_URL")
+    args.schema = os.getenv("POSTGRES_SCHEMA_TSE_ETL_FINAL", "tse_etl_final")
+    args.benchmark = args.modo != "certificar"
+    args.sem_validacao = args.modo != "certificar"
+    args.benchmark_output = (
+        BASE_DIR / "data" / "benchmark" / "tse" / "resultados" / "tse_etl.csv"
+        if args.modo == "medir"
+        else None
+    )
     executar(args)
 
 

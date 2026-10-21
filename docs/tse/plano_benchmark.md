@@ -342,7 +342,6 @@ Os resultados futuros do TSE deverao ser gravados em:
 
 ```text
 data/benchmark/tse/resultados/
-data/benchmark/tse/resumos/
 ```
 
 ## Schemas e tabelas fisicas

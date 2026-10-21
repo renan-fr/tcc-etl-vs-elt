@@ -227,7 +227,6 @@ Os resultados do ENEM serão gravados em:
 
 ```text
 data/benchmark/enem/resultados/
-data/benchmark/enem/resumos/
 ```
 
 ## Schemas e tabelas físicas

@@ -120,10 +120,8 @@ class ResultadoBenchmark:
     volume_configurado: int | None
     arquitetura: str
     rodada: int | None
-    aquecimento: bool
     tempo_leitura: float
     tempo_transformacao: float
-    tempo_validacao: float | None
     tempo_carga: float
     tempo_total: float
     throughput: float
@@ -144,7 +142,6 @@ class ResultadoBenchmark:
     linhas_secao: int
     linhas_candidato: int
     linhas_processadas: int
-    validacao_executada: bool
     timestamp: str
 
 
@@ -1030,8 +1027,7 @@ def executar(args: argparse.Namespace) -> None:
     inicio_total = time.perf_counter()
     if args.limite is not None and args.manifesto_chaves is None:
         raise SystemExit(
-            "O TSE ELT exige --manifesto-chaves quando --limite e informado. "
-            "Prepare o manifesto antes da execucao."
+            "O manifesto do volume deve ser preparado antes da execucao."
         )
 
     monitor = MonitorRecursos()
@@ -1099,7 +1095,7 @@ def executar(args: argparse.Namespace) -> None:
                 monitor.parar()
             raise SystemExit("Pipeline interrompido por erros criticos de validacao.")
     else:
-        print("Validacao interna ignorada (--sem-validacao).")
+        print("Validacao interna ignorada no modo de desempenho.")
 
     tempo_total = time.perf_counter() - inicio_total
     print(f"Munzona: {linhas_munzona} linhas")
@@ -1124,10 +1120,8 @@ def executar(args: argparse.Namespace) -> None:
         volume_configurado=args.limite,
         arquitetura="elt",
         rodada=args.rodada,
-        aquecimento=args.aquecimento,
         tempo_leitura=tempo_leitura,
         tempo_transformacao=tempo_transformacao,
-        tempo_validacao=tempo_validacao,
         tempo_carga=tempo_carga,
         tempo_total=tempo_total,
         throughput=quantidade / tempo_total if tempo_total else 0.0,
@@ -1136,7 +1130,6 @@ def executar(args: argparse.Namespace) -> None:
         linhas_secao=linhas_secao,
         linhas_candidato=linhas_candidato,
         linhas_processadas=linhas_processadas,
-        validacao_executada=tempo_validacao is not None,
         timestamp=datetime.now().isoformat(timespec="seconds"),
         **recursos,
     )
@@ -1148,62 +1141,51 @@ def executar(args: argparse.Namespace) -> None:
     if args.benchmark_output:
         _salvar_benchmark(resultado, args.benchmark_output)
         print(f"Resultado salvo em: {args.benchmark_output}")
-    if args.benchmark_summary_output:
-        args.benchmark_summary_output.parent.mkdir(parents=True, exist_ok=True)
-        with args.benchmark_summary_output.open("a", encoding="utf-8") as arquivo:
-            arquivo.write(
-                f"Benchmark ELT TSE | volume={args.limite or 'todos'} | "
-                f"total={tempo_total:.3f}s | registros={quantidade} | "
-                f"processadas={linhas_processadas} | "
-                f"throughput={resultado.throughput:.2f}\n"
-            )
-
-
 def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(description="Pipeline ELT do TSE 2024")
+    parser.add_argument("--limite", type=int, required=True)
     parser.add_argument(
-        "--limite",
-        type=int,
-        default=0,
-        help="Volume nominal de linhas da fonte de secao; use 0 para todas.",
+        "--modo",
+        choices=["certificar", "aquecimento", "medir"],
+        required=True,
     )
-    parser.add_argument("--database-url", default=os.getenv("DATABASE_URL"))
-    parser.add_argument(
-        "--schema-raw",
-        default=os.getenv("POSTGRES_SCHEMA_TSE_ELT_RAW", SCHEMA_RAW),
-    )
-    parser.add_argument(
-        "--schema-staging",
-        default=os.getenv("POSTGRES_SCHEMA_TSE_ELT_STAGING", SCHEMA_STAGING),
-    )
-    parser.add_argument(
-        "--schema-final",
-        default=os.getenv("POSTGRES_SCHEMA_TSE_ELT_FINAL", SCHEMA_FINAL),
-    )
-    parser.add_argument("--benchmark", action="store_true")
-    parser.add_argument(
-        "--sem-validacao",
-        action="store_true",
-        help="Ignora validacoes internas no benchmark previamente certificado.",
-    )
-    parser.add_argument("--rodada", type=int, default=None)
-    parser.add_argument("--aquecimento", action="store_true")
-    parser.add_argument("--manifesto-chaves", type=Path, default=None)
-    parser.add_argument(
-        "--benchmark-output",
-        type=Path,
-        default=BASE_DIR / "data" / "benchmark" / "tse" / "resultados" / "tse_elt.csv",
-    )
-    parser.add_argument(
-        "--benchmark-summary-output",
-        type=Path,
-        default=BASE_DIR / "data" / "benchmark" / "tse" / "resumos" / "tse_elt.txt",
-    )
+    parser.add_argument("--rodada", type=int)
     args = parser.parse_args()
-    if args.limite < 0:
-        parser.error("--limite deve ser maior ou igual a zero.")
-    args.limite = None if args.limite == 0 else args.limite
+    if args.limite < 1:
+        parser.error("--limite deve ser maior que zero.")
+    if args.modo == "medir" and args.rodada is None:
+        parser.error("--rodada e obrigatoria no modo medir.")
+    if args.modo != "medir" and args.rodada is not None:
+        parser.error("--rodada so pode ser usada no modo medir.")
+
+    args.manifesto_chaves = (
+        BASE_DIR
+        / "data"
+        / "benchmark"
+        / "tse"
+        / "subconjuntos"
+        / f"chaves_{args.limite}.csv"
+    )
+    if not args.manifesto_chaves.is_file():
+        parser.error(
+            f"Manifesto ausente: {args.manifesto_chaves}. "
+            "Prepare-o com src/tse/preparar_subconjuntos.py."
+        )
+
+    args.database_url = os.getenv("DATABASE_URL")
+    args.schema_raw = os.getenv("POSTGRES_SCHEMA_TSE_ELT_RAW", SCHEMA_RAW)
+    args.schema_staging = os.getenv(
+        "POSTGRES_SCHEMA_TSE_ELT_STAGING", SCHEMA_STAGING
+    )
+    args.schema_final = os.getenv("POSTGRES_SCHEMA_TSE_ELT_FINAL", SCHEMA_FINAL)
+    args.benchmark = args.modo != "certificar"
+    args.sem_validacao = args.modo != "certificar"
+    args.benchmark_output = (
+        BASE_DIR / "data" / "benchmark" / "tse" / "resultados" / "tse_elt.csv"
+        if args.modo == "medir"
+        else None
+    )
     executar(args)
 
 

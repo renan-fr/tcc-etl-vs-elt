@@ -689,14 +689,14 @@ Além disso, serão realizadas execuções de aquecimento que não participarão
 
 ## 15. Registro dos resultados
 
-Cada execução deverá gerar automaticamente um registro estruturado contendo, no mínimo:
+Cada execução válida deverá gerar automaticamente um registro estruturado. O
+aquecimento e a certificação não serão gravados no arquivo de desempenho.
 
 ```text
 dataset
 volume_nominal
 arquitetura
 rodada
-aquecimento
 tempo_leitura
 tempo_transformacao
 tempo_carga
@@ -707,7 +707,6 @@ cpu_pico
 ram_media
 ram_pico
 quantidade_registros_total
-validacao_executada
 timestamp
 ```
 
@@ -723,7 +722,6 @@ linhas_resultados
 quantidade_registros_total
 arquitetura
 rodada
-aquecimento
 tempo_leitura
 tempo_transformacao
 tempo_carga
@@ -733,7 +731,6 @@ cpu_media
 cpu_pico
 ram_media
 ram_pico
-validacao_executada
 timestamp
 ```
 

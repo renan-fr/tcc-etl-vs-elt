@@ -156,10 +156,8 @@ class ResultadoBenchmark:
     volume_configurado: int | None
     arquitetura: str
     rodada: int | None
-    aquecimento: bool
     tempo_leitura: float
     tempo_transformacao: float
-    tempo_validacao: float | None
     tempo_carga: float
     tempo_total: float
     throughput: float
@@ -178,7 +176,6 @@ class ResultadoBenchmark:
     quantidade_registros: int
     linhas_participantes: int
     linhas_resultados: int
-    validacao_executada: bool
     timestamp: str
 
 
@@ -949,7 +946,7 @@ def executar_elt(
                         "Pipeline interrompido por erros críticos de validação."
                     )
             else:
-                print("Validação interna ignorada (--sem-validacao).")
+                print("Validação interna ignorada no modo de desempenho.")
 
             linhas_participantes = linhas_raw_participantes
             linhas_resultados = linhas_raw_resultados
@@ -986,74 +983,65 @@ def salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
         escritor.writerow(linha)
 
 
-def finalizar_benchmark(monitor, inicio_total, tempos, limite, rodada, aquecimento, caminho_csv, caminho_resumo) -> None:
+def finalizar_benchmark(
+    monitor,
+    inicio_total,
+    tempos,
+    limite,
+    rodada,
+    caminho_csv: Path | None,
+) -> None:
     recursos = monitor.parar()
     quantidade = tempos.linhas_participantes + tempos.linhas_resultados
     tempo_total = time.perf_counter() - inicio_total
     resultado = ResultadoBenchmark(
         dataset="enem", volume_configurado=limite, arquitetura="elt",
-        rodada=rodada, aquecimento=aquecimento, tempo_leitura=tempos.leitura,
-        tempo_transformacao=tempos.transformacao_sql, tempo_validacao=tempos.validacao,
+        rodada=rodada, tempo_leitura=tempos.leitura,
+        tempo_transformacao=tempos.transformacao_sql,
         tempo_carga=tempos.carga_raw, tempo_total=tempo_total,
         throughput=quantidade / tempo_total if tempo_total else 0.0,
         quantidade_registros=quantidade, linhas_participantes=tempos.linhas_participantes,
         linhas_resultados=tempos.linhas_resultados,
-        validacao_executada=tempos.validacao is not None,
         timestamp=datetime.now().isoformat(timespec="seconds"), **recursos,
     )
-    salvar_benchmark(resultado, caminho_csv)
-    caminho_resumo.parent.mkdir(parents=True, exist_ok=True)
-    with caminho_resumo.open("a", encoding="utf-8") as arquivo:
-        arquivo.write(f"Benchmark ELT ENEM | volume={limite or 'todos'} | total={tempo_total:.3f}s | registros={quantidade} | throughput={resultado.throughput:.2f}\n")
-    print(f"Resultado do benchmark salvo em: {caminho_csv}")
+    if caminho_csv:
+        salvar_benchmark(resultado, caminho_csv)
+        print(f"Resultado do benchmark salvo em: {caminho_csv}")
 
 
 def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(description="Pipeline ELT do ENEM 2024")
-    parser.add_argument("--database-url", default=os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL"))
+    parser.add_argument("--limite", type=int, required=True)
     parser.add_argument(
-        "--schema-raw",
-        default=os.getenv("POSTGRES_SCHEMA_ENEM_ELT_RAW", SCHEMA_RAW),
+        "--modo",
+        choices=["certificar", "aquecimento", "medir"],
+        required=True,
     )
-    parser.add_argument(
-        "--schema-final",
-        default=os.getenv("POSTGRES_SCHEMA_ENEM_ELT_FINAL", SCHEMA_FINAL),
-    )
-    parser.add_argument("--benchmark", action="store_true")
-    parser.add_argument("--benchmark-output", type=Path, default=BASE_DIR / "data" / "benchmark" / "enem" / "resultados" / "enem_elt.csv")
-    parser.add_argument("--benchmark-summary-output", type=Path, default=BASE_DIR / "data" / "benchmark" / "enem" / "resumos" / "enem_elt.txt")
-    parser.add_argument("--rodada", type=int, default=None)
-    parser.add_argument("--aquecimento", action="store_true")
-    parser.add_argument(
-        "--sem-validacao",
-        action="store_true",
-        help="Ignora validações internas no benchmark previamente certificado.",
-    )
-    parser.add_argument(
-        "--limite",
-        type=int,
-        default=0,
-        help="Quantidade máxima de linhas lidas de cada arquivo; use 0 para todas.",
-    )
+    parser.add_argument("--rodada", type=int)
     args = parser.parse_args()
-    if args.limite < 0:
-        parser.error("--limite deve ser maior ou igual a zero.")
+    if args.limite < 1:
+        parser.error("--limite deve ser maior que zero.")
+    if args.modo == "medir" and args.rodada is None:
+        parser.error("--rodada é obrigatória no modo medir.")
+    if args.modo != "medir" and args.rodada is not None:
+        parser.error("--rodada só pode ser usada no modo medir.")
+
+    benchmark = args.modo != "certificar"
     inicio_total = time.perf_counter()
     monitor = MonitorRecursos()
-    if args.benchmark:
+    if benchmark:
         monitor.iniciar()
-    limite = None if args.limite == 0 else args.limite
     try:
         tempos = executar_elt(
-            args.database_url,
-            limite,
-            args.schema_raw,
-            args.schema_final,
-            validar=not args.sem_validacao,
+            os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL"),
+            args.limite,
+            os.getenv("POSTGRES_SCHEMA_ENEM_ELT_RAW", SCHEMA_RAW),
+            os.getenv("POSTGRES_SCHEMA_ENEM_ELT_FINAL", SCHEMA_FINAL),
+            validar=args.modo == "certificar",
         )
     except (psycopg2.Error, UnicodeError, ValueError) as erro:
-        if args.benchmark:
+        if benchmark:
             monitor.parar()
         raise SystemExit(f"Falha no pipeline ELT do ENEM: {erro}") from erro
     print(f"Leitura/preparacao: {tempos.leitura:.3f}s")
@@ -1064,10 +1052,24 @@ def main() -> None:
     else:
         print(f"Validação: {tempos.validacao:.3f}s")
     print(f"Total: {tempos.total:.3f}s")
-    if args.benchmark:
+    if benchmark:
+        caminho_csv = (
+            BASE_DIR
+            / "data"
+            / "benchmark"
+            / "enem"
+            / "resultados"
+            / "enem_elt.csv"
+            if args.modo == "medir"
+            else None
+        )
         finalizar_benchmark(
-            monitor, inicio_total, tempos, limite, args.rodada, args.aquecimento,
-            args.benchmark_output, args.benchmark_summary_output,
+            monitor,
+            inicio_total,
+            tempos,
+            args.limite,
+            args.rodada,
+            caminho_csv,
         )
 
 

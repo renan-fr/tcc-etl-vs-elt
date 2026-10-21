@@ -38,10 +38,8 @@ class ResultadoBenchmark:
     volume_configurado: int | None
     arquitetura: str
     rodada: int | None
-    aquecimento: bool
     tempo_leitura: float
     tempo_transformacao: float
-    tempo_validacao: float | None
     tempo_carga: float
     tempo_total: float
     throughput: float
@@ -60,7 +58,6 @@ class ResultadoBenchmark:
     quantidade_registros: int
     linhas_participantes: int
     linhas_resultados: int
-    validacao_executada: bool
     timestamp: str
 
 
@@ -1144,11 +1141,6 @@ def _linhas_resumo_benchmark(resultado: ResultadoBenchmark) -> list[str]:
         f"Linhas resultados: {resultado.linhas_resultados}",
         f"Tempo leitura: {resultado.tempo_leitura:.3f}s",
         f"Tempo transformacao: {resultado.tempo_transformacao:.3f}s",
-        "Tempo validacao: " + (
-            f"{resultado.tempo_validacao:.3f}s"
-            if resultado.tempo_validacao is not None
-            else "nao executada"
-        ),
         f"Tempo carga: {resultado.tempo_carga:.3f}s",
         f"Tempo total: {resultado.tempo_total:.3f}s",
         f"Throughput: {resultado.throughput:.2f} registros/s",
@@ -1157,22 +1149,6 @@ def _linhas_resumo_benchmark(resultado: ResultadoBenchmark) -> list[str]:
         f"RAM media total: {resultado.ram_media_total_mb:.2f} MB",
         f"RAM pico total: {resultado.ram_pico_total_mb:.2f} MB",
     ]
-
-
-def _resumo_benchmark_texto(resultado: ResultadoBenchmark) -> str:
-    linhas = _linhas_resumo_benchmark(resultado)
-    separador = "=" * 60
-    return f"{separador}\n" + "\n".join(linhas) + f"\n{separador}\n"
-
-
-def _salvar_resumo_benchmark(
-    resultado: ResultadoBenchmark,
-    caminho: Path,
-) -> None:
-    caminho.parent.mkdir(parents=True, exist_ok=True)
-    with caminho.open("a", encoding="utf-8") as arquivo:
-        arquivo.write(_resumo_benchmark_texto(resultado))
-        arquivo.write("\n")
 
 
 def _imprimir_resultado_benchmark(resultado: ResultadoBenchmark) -> None:
@@ -1186,15 +1162,12 @@ def _finalizar_benchmark(
     inicio_total: float,
     tempo_leitura: float,
     tempo_transformacao: float,
-    tempo_validacao: float | None,
     tempo_carga: float,
     limite: int | None,
     linhas_participantes: int,
     linhas_resultados: int,
     rodada: int | None,
-    aquecimento: bool,
     benchmark_output: Path | None,
-    benchmark_summary_output: Path | None,
 ) -> None:
     if not benchmark:
         return
@@ -1209,17 +1182,14 @@ def _finalizar_benchmark(
         volume_configurado=limite,
         arquitetura="etl",
         rodada=rodada,
-        aquecimento=aquecimento,
         tempo_leitura=tempo_leitura,
         tempo_transformacao=tempo_transformacao,
-        tempo_validacao=tempo_validacao,
         tempo_carga=tempo_carga,
         tempo_total=tempo_total,
         throughput=throughput,
         quantidade_registros=quantidade_registros,
         linhas_participantes=linhas_participantes,
         linhas_resultados=linhas_resultados,
-        validacao_executada=tempo_validacao is not None,
         timestamp=datetime.now().isoformat(timespec="seconds"),
         **recursos,
     )
@@ -1228,9 +1198,6 @@ def _finalizar_benchmark(
     if benchmark_output:
         _salvar_resultado_benchmark(resultado, benchmark_output)
         print(f"Resultado do benchmark salvo em: {benchmark_output}")
-    if benchmark_summary_output:
-        _salvar_resumo_benchmark(resultado, benchmark_summary_output)
-        print(f"Resumo do benchmark salvo em: {benchmark_summary_output}")
 
 
 def main(
@@ -1238,12 +1205,9 @@ def main(
     database_url: str | None,
     schema: str,
     if_exists: str,
-    somente_validar: bool,
     benchmark: bool = False,
     benchmark_output: Path | None = None,
-    benchmark_summary_output: Path | None = None,
     rodada: int | None = None,
-    aquecimento: bool = False,
     validar: bool = True,
 ) -> None:
     inicio_total = time.perf_counter()
@@ -1295,27 +1259,7 @@ def main(
                 monitor.parar()
             raise SystemExit("Carga interrompida por erros críticos de validação.")
     else:
-        print("Validação interna ignorada (--sem-validacao).")
-
-    if somente_validar:
-        print("Carga ignorada (--somente-validar).")
-        _finalizar_benchmark(
-            benchmark=benchmark,
-            monitor=monitor,
-            inicio_total=inicio_total,
-            tempo_leitura=tempo_leitura,
-            tempo_transformacao=tempo_transformacao,
-            tempo_validacao=tempo_validacao,
-            tempo_carga=0.0,
-            limite=limite,
-            linhas_participantes=len(participantes),
-            linhas_resultados=len(resultados),
-            rodada=rodada,
-            aquecimento=aquecimento,
-            benchmark_output=benchmark_output,
-            benchmark_summary_output=benchmark_summary_output,
-        )
-        return
+        print("Validação interna ignorada no modo de desempenho.")
 
     try:
         conexao_postgres = obter_conexao_postgres(database_url)
@@ -1345,15 +1289,12 @@ def main(
         inicio_total=inicio_total,
         tempo_leitura=tempo_leitura,
         tempo_transformacao=tempo_transformacao,
-        tempo_validacao=tempo_validacao,
         tempo_carga=tempo_carga,
         limite=limite,
         linhas_participantes=len(participantes),
         linhas_resultados=len(resultados),
         rodada=rodada,
-        aquecimento=aquecimento,
         benchmark_output=benchmark_output,
-        benchmark_summary_output=benchmark_summary_output,
     )
 
 
@@ -1364,96 +1305,37 @@ if __name__ == "__main__":
         description="Pipeline ETL dos microdados do ENEM 2024"
     )
 
+    parser.add_argument("--limite", type=int, required=True)
     parser.add_argument(
-        "--limite",
-        type=int,
-        default=100_000,
-        help="Quantidade máxima de linhas lidas de cada arquivo. Use 0 para ler tudo.",
+        "--modo",
+        choices=["certificar", "aquecimento", "medir"],
+        required=True,
     )
-
-    parser.add_argument(
-        "--database-url",
-        default=os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL"),
-        help=(
-            "URL de conexão PostgreSQL opcional. Se omitida, usa POSTGRES_HOST, "
-            "POSTGRES_PORT, POSTGRES_DB, POSTGRES_USER e POSTGRES_PASSWORD."
-        ),
-    )
-
-    parser.add_argument(
-        "--schema",
-        default=os.getenv("POSTGRES_SCHEMA_ENEM_ETL_FINAL", "enem_etl_final"),
-        help="Schema de destino no PostgreSQL.",
-    )
-
-    parser.add_argument(
-        "--if-exists",
-        choices=["replace", "append"],
-        default="replace",
-        help="Estratégia de carga para as tabelas finais.",
-    )
-
-    parser.add_argument(
-        "--somente-validar",
-        action="store_true",
-        help="Executa extração, transformação e validação sem carregar no banco.",
-    )
-
-    parser.add_argument(
-        "--benchmark",
-        action="store_true",
-        help="Mede tempos, CPU e RAM da execucao.",
-    )
-
-    parser.add_argument(
-        "--sem-validacao",
-        action="store_true",
-        help="Ignora validações internas no benchmark previamente certificado.",
-    )
-
-    parser.add_argument(
-        "--benchmark-output",
-        type=Path,
-        default=BASE_DIR / "data" / "benchmark" / "enem" / "resultados" / "enem_etl.csv",
-        help="Arquivo CSV de saida das metricas do benchmark.",
-    )
-
-    parser.add_argument(
-        "--benchmark-summary-output",
-        type=Path,
-        default=BASE_DIR / "data" / "benchmark" / "enem" / "resumos" / "enem_etl.txt",
-        help="Arquivo TXT de saida do resumo do benchmark.",
-    )
-
-    parser.add_argument(
-        "--rodada",
-        type=int,
-        default=None,
-        help="Numero da rodada do benchmark.",
-    )
-
-    parser.add_argument(
-        "--aquecimento",
-        action="store_true",
-        help="Marca a execucao como aquecimento.",
-    )
+    parser.add_argument("--rodada", type=int)
 
     args = parser.parse_args()
 
-    limite = None if args.limite == 0 else args.limite
+    if args.limite < 1:
+        parser.error("--limite deve ser maior que zero.")
+    if args.modo == "medir" and args.rodada is None:
+        parser.error("--rodada é obrigatória no modo medir.")
+    if args.modo != "medir" and args.rodada is not None:
+        parser.error("--rodada só pode ser usada no modo medir.")
+
+    benchmark = args.modo != "certificar"
+    benchmark_output = (
+        BASE_DIR / "data" / "benchmark" / "enem" / "resultados" / "enem_etl.csv"
+        if args.modo == "medir"
+        else None
+    )
 
     main(
-        limite=limite,
-        database_url=args.database_url,
-        schema=args.schema,
-        if_exists=args.if_exists,
-        somente_validar=args.somente_validar,
-        benchmark=args.benchmark,
-        benchmark_output=args.benchmark_output if args.benchmark else None,
-        benchmark_summary_output=(
-            args.benchmark_summary_output if args.benchmark else None
-        ),
+        limite=args.limite,
+        database_url=os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL"),
+        schema=os.getenv("POSTGRES_SCHEMA_ENEM_ETL_FINAL", "enem_etl_final"),
+        if_exists="replace",
+        benchmark=benchmark,
+        benchmark_output=benchmark_output,
         rodada=args.rodada,
-        aquecimento=args.aquecimento,
-        validar=not args.sem_validacao,
+        validar=args.modo == "certificar",
     )
