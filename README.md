@@ -37,16 +37,15 @@ data/benchmark/tse/
 
 Depois da certificação, a campanha completa deve ser iniciada pelo orquestrador
 global. Ele randomiza ENEM/TSE, volumes e arquiteturas com seed reproduzível,
-registra a identidade da execução e exige CSVs de resultado vazios:
+identifica os resultados com um `run_id` e exige CSVs de resultado vazios:
 
 ```powershell
-python src\benchmark.py --limpar-resultados
+python src\benchmark.py --run-id oficial_01 --limpar-resultados
 ```
 
 O comando executa um aquecimento e cinco rodadas válidas para cada uma das 16
 combinações, totalizando 80 medições gravadas. O uso de
-`--limpar-resultados` remove os CSVs de campanhas anteriores; os manifestos de
-campanha permanecem em `data/benchmark/campanhas/`.
+`--limpar-resultados` remove os CSVs de campanhas anteriores.
 Por segurança, o orquestrador também recusa iniciar a campanha oficial quando
 a árvore Git contém alterações não registradas.
 

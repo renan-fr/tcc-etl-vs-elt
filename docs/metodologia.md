@@ -579,8 +579,8 @@ RODADA 5
 Nova ordem randomizada.
 ```
 
-A randomização será reproduzível pela seed padrão `20241027`, registrada no
-manifesto da campanha e configurável no orquestrador.
+A randomização será reproduzível pela seed padrão `20241027`, definida no código
+e configurável no orquestrador.
 
 Isso evita executar todos os testes ETL primeiro e todos os testes ELT posteriormente, reduzindo possíveis vieses temporais.
 
@@ -604,15 +604,13 @@ Máquina inicialmente definida:
 
 A GPU não terá papel direto no experimento, mas poderá ser registrada como parte da configuração completa da máquina.
 
-Cada campanha registrará automaticamente:
+Antes da campanha oficial deverão ser documentados:
 
 - sistema operacional;
 - versão do Python;
 - versão do PostgreSQL;
 - versões das principais bibliotecas;
-- nome da máquina e processador;
-- commit Git;
-- identificador único `run_id`.
+- nome da máquina e processador.
 
 O tipo e modelo do armazenamento deverá ser registrado manualmente junto à
 descrição final da máquina, pois não é identificado de forma portável pelo
@@ -728,15 +726,13 @@ quantidade_registros_total
 timestamp
 ```
 
-Cada linha também conterá `run_id`, commit Git, versões do Python e PostgreSQL,
-versões das dependências, identificação da máquina, sistema, processador e a
-definição das métricas de RAM. O plano randomizado completo e a seed ficarão em
-`data/benchmark/campanhas/<run_id>.json`.
+Cada linha também conterá um `run_id`, usado para identificar a campanha à qual
+o resultado pertence. A campanha oficial usará `oficial_01`.
 
 Uma campanha oficial só poderá começar com os quatro CSVs de resultado ausentes
 ou vazios. Se houver dados anteriores, o orquestrador interromperá a execução;
 a remoção explícita será feita com `--limpar-resultados`. O orquestrador global
-também exigirá uma árvore Git limpa, salvo uso consciente da opção de exceção.
+também exigirá uma árvore Git limpa.
 
 Quando aplicável, o campo genérico de volume deverá ser complementado ou
 substituído por campos mais específicos. Para a base ENEM, deverão ser

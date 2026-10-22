@@ -5,7 +5,6 @@ import csv
 from dataclasses import dataclass
 from datetime import datetime
 from io import StringIO
-import json
 import os
 from pathlib import Path
 import threading
@@ -979,9 +978,8 @@ def salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
                 f"O arquivo de benchmark {caminho} esta no formato antigo "
                 "(delimitador ','). Remova-o ou mova-o antes de continuar."
             )
-    identidade = json.loads(os.environ["BENCHMARK_IDENTIDADE_JSON"])
-    campos = [*identidade, *resultado.__dataclass_fields__]
-    linha = dict(identidade)
+    campos = ["run_id", *resultado.__dataclass_fields__]
+    linha = {"run_id": os.environ["BENCHMARK_RUN_ID"]}
     for campo in resultado.__dataclass_fields__:
         valor = getattr(resultado, campo)
         if isinstance(valor, float):

@@ -5,7 +5,6 @@ import csv
 from dataclasses import dataclass
 from datetime import datetime
 from io import StringIO
-import json
 import os
 from pathlib import Path
 import threading
@@ -1020,9 +1019,8 @@ class MonitorRecursos:
 def _salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
     caminho.parent.mkdir(parents=True, exist_ok=True)
     existe = caminho.exists() and caminho.stat().st_size > 0
-    identidade = json.loads(os.environ["BENCHMARK_IDENTIDADE_JSON"])
-    campos = [*identidade, *resultado.__dataclass_fields__]
-    linha: dict[str, object] = dict(identidade)
+    campos = ["run_id", *resultado.__dataclass_fields__]
+    linha: dict[str, object] = {"run_id": os.environ["BENCHMARK_RUN_ID"]}
     for campo in resultado.__dataclass_fields__:
         valor = getattr(resultado, campo)
         if isinstance(valor, float):

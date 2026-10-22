@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from io import StringIO
-import json
 import os
 from pathlib import Path
 import threading
@@ -732,8 +731,7 @@ class MonitorRecursos:
 def _salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
     caminho.parent.mkdir(parents=True, exist_ok=True)
     existe = caminho.exists() and caminho.stat().st_size > 0
-    identidade = json.loads(os.environ["BENCHMARK_IDENTIDADE_JSON"])
-    linha = dict(identidade)
+    linha = {"run_id": os.environ["BENCHMARK_RUN_ID"]}
     for campo, valor in resultado.__dict__.items():
         if isinstance(valor, float):
             valor = round(valor, 3 if campo.startswith("tempo_") else 2)

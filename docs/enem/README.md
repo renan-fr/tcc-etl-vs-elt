@@ -48,6 +48,7 @@ Os únicos parâmetros do experimento são:
 - `--rodadas`: repetições válidas por volume;
 - `--certificar`: executa validações e equivalência em vez de medir desempenho.
 - `--seed`: seed da ordem reproduzível (padrão `20241027`);
+- `--run-id`: identificação gravada nas linhas da campanha;
 - `--limpar-resultados`: remove explicitamente resultados anteriores antes de
   iniciar uma nova campanha.
 

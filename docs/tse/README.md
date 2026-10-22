@@ -32,8 +32,7 @@ teto disponível da fonte, não três milhões de linhas efetivas.
 ## Certificação
 
 A certificação executa ETL e ELT com validações internas e compara os produtos
-finais. Também grava o log completo e um CSV com as contagens de diferenças
-entre `munzona` e seções por volume e arquitetura:
+finais. Os resultados são exibidos no terminal:
 
 ```powershell
 python src\tse\benchmark.py --certificar
@@ -44,6 +43,24 @@ Para certificar apenas o piloto:
 ```powershell
 python src\tse\benchmark.py --certificar --volumes 100000
 ```
+
+### Alertas das fontes
+
+A certificação completa encontrou diferenças entre os valores consolidados em
+`munzona` e a soma das seções. ETL e ELT encontraram exatamente as mesmas
+contagens; portanto, estes são alertas das fontes, não divergências entre as
+arquiteturas.
+
+| Volume nominal | Votos nominais | Votos nulos | Votos de legenda |
+|---:|---:|---:|---:|
+| 100 mil | 361 | 231 | 78 |
+| 500 mil | 1.468 | 921 | 236 |
+| 1 milhão | 2.922 | 1.676 | 539 |
+| 3 milhões | 2.965 | 1.698 | 550 |
+
+Não foram encontradas diferenças em comparecimento, abstenções ou votos
+brancos. As quantidades representam chaves de município, zona e cargo, não a
+quantidade de votos divergentes.
 
 ## Benchmark
 
@@ -65,6 +82,7 @@ Os únicos parâmetros do experimento são:
 - `--rodadas`: repetições válidas por volume;
 - `--certificar`: executa validações e equivalência em vez de medir desempenho.
 - `--seed`: seed da ordem reproduzível (padrão `20241027`);
+- `--run-id`: identificação gravada nas linhas da campanha;
 - `--limpar-resultados`: remove explicitamente resultados anteriores antes de
   iniciar uma nova campanha.
 

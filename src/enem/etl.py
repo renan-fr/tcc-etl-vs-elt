@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from io import StringIO
-import json
 import os
 from pathlib import Path
 import argparse
@@ -1122,8 +1121,7 @@ def _salvar_resultado_benchmark(
                 f"O arquivo de benchmark {caminho} esta no formato antigo "
                 "(delimitador ','). Remova-o ou mova-o antes de continuar."
             )
-    identidade = json.loads(os.environ["BENCHMARK_IDENTIDADE_JSON"])
-    linha_formatada = dict(identidade)
+    linha_formatada = {"run_id": os.environ["BENCHMARK_RUN_ID"]}
     for campo, valor in resultado.__dict__.items():
         if isinstance(valor, float):
             casas = 3 if campo.startswith("tempo_") else 2

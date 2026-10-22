@@ -1,19 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import random
+import os
 from pathlib import Path
+import random
 import subprocess
 import sys
-
-from dotenv import load_dotenv
-
-from benchmark_comum import (
-    ambiente_com_identidade,
-    criar_identidade,
-    preparar_resultados,
-    salvar_campanha,
-)
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -29,6 +21,33 @@ RESULTADOS = [
     for dataset in ("enem", "tse")
     for arquitetura in ("etl", "elt")
 ]
+
+
+def preparar_resultados(limpar: bool) -> None:
+    existentes = [c for c in RESULTADOS if c.exists() and c.stat().st_size > 0]
+    if existentes and not limpar:
+        lista = "\n".join(f"- {c}" for c in existentes)
+        raise SystemExit(
+            "A campanha deve comecar sem resultados anteriores:\n"
+            f"{lista}\nUse --limpar-resultados para remove-los."
+        )
+    for caminho in existentes:
+        caminho.unlink()
+
+
+def validar_git_limpo() -> None:
+    resultado = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=BASE_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if resultado.returncode != 0 or resultado.stdout.strip():
+        raise SystemExit(
+            "A campanha oficial exige uma arvore Git limpa. "
+            "Registre as alteracoes antes de executar."
+        )
 
 
 def comando(
@@ -52,20 +71,20 @@ def comando(
 
 
 def main() -> None:
-    load_dotenv(BASE_DIR / ".env")
     parser = argparse.ArgumentParser(
         description="Orquestra a campanha global e randomizada de ENEM e TSE."
     )
     parser.add_argument("--volumes", nargs="+", type=int, default=VOLUMES_PADRAO)
     parser.add_argument("--rodadas", type=int, default=5)
     parser.add_argument("--seed", type=int, default=SEED_PADRAO)
-    parser.add_argument("--run-id")
+    parser.add_argument("--run-id", default="oficial_01")
     parser.add_argument("--limpar-resultados", action="store_true")
-    parser.add_argument("--permitir-worktree-sujo", action="store_true")
     args = parser.parse_args()
 
     if args.rodadas < 1 or any(volume < 1 for volume in args.volumes):
         parser.error("Volumes e rodadas devem ser maiores que zero.")
+    if not args.run_id.strip():
+        parser.error("--run-id nao pode ser vazio.")
 
     ausentes = [
         BASE_DIR
@@ -87,17 +106,12 @@ def main() -> None:
     if ausentes:
         parser.error("Manifestos TSE ausentes:\n" + "\n".join(map(str, ausentes)))
 
-    identidade = criar_identidade(BASE_DIR, args.run_id)
-    if (
-        identidade["git_worktree_limpo"] != "true"
-        and not args.permitir_worktree_sujo
-    ):
-        raise SystemExit(
-            "A campanha oficial exige uma arvore Git limpa. "
-            "Revise e registre as alteracoes antes de executar."
-        )
-    preparar_resultados(RESULTADOS, args.limpar_resultados)
-    ambiente = ambiente_com_identidade(identidade)
+    validar_git_limpo()
+    preparar_resultados(args.limpar_resultados)
+
+    ambiente = os.environ.copy()
+    ambiente["BENCHMARK_RUN_ID"] = args.run_id.strip()
+    ambiente["PYTHONIOENCODING"] = "utf-8"
     rng = random.Random(args.seed)
     cenarios = [
         (dataset, volume, arquitetura)
@@ -105,55 +119,30 @@ def main() -> None:
         for volume in args.volumes
         for arquitetura in ("etl", "elt")
     ]
-    plano: list[dict[str, object]] = []
     fases = [
         ("aquecimento", None),
         *[("medir", rodada) for rodada in range(1, args.rodadas + 1)],
     ]
+
+    print(f"Campanha: {args.run_id}")
+    print(f"Seed: {args.seed}")
+    total = len(cenarios) * len(fases)
+    indice = 0
     for modo, rodada in fases:
         ordem = cenarios.copy()
         rng.shuffle(ordem)
         for dataset, volume, arquitetura in ordem:
-            plano.append(
-                {
-                    "modo": modo,
-                    "rodada": rodada,
-                    "dataset": dataset,
-                    "volume": volume,
-                    "arquitetura": arquitetura,
-                }
+            indice += 1
+            print(
+                f"\n=== {indice}/{total} | {modo} | {dataset.upper()} | "
+                f"{volume} | {arquitetura.upper()} ==="
             )
-
-    manifesto = salvar_campanha(
-        BASE_DIR,
-        identidade,
-        {
-            "seed": args.seed,
-            "volumes": args.volumes,
-            "rodadas": args.rodadas,
-            "plano": plano,
-        },
-    )
-    print(f"Campanha: {identidade['run_id']}")
-    print(f"Manifesto: {manifesto}")
-    for indice, item in enumerate(plano, start=1):
-        print(
-            f"\n=== {indice}/{len(plano)} | {item['modo']} | "
-            f"{str(item['dataset']).upper()} | {item['volume']} | "
-            f"{str(item['arquitetura']).upper()} ==="
-        )
-        subprocess.run(
-            comando(
-                str(item["dataset"]),
-                str(item["arquitetura"]),
-                int(item["volume"]),
-                str(item["modo"]),
-                int(item["rodada"]) if item["rodada"] is not None else None,
-            ),
-            cwd=BASE_DIR,
-            env=ambiente,
-            check=True,
-        )
+            subprocess.run(
+                comando(dataset, arquitetura, volume, modo, rodada),
+                cwd=BASE_DIR,
+                env=ambiente,
+                check=True,
+            )
 
 
 if __name__ == "__main__":
