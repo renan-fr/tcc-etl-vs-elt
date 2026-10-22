@@ -44,7 +44,8 @@ python src\benchmark.py --run-id oficial_01 --limpar-resultados
 ```
 
 O comando executa um aquecimento e cinco rodadas válidas para cada uma das 16
-combinações, totalizando 80 medições gravadas. O uso de
+combinações (2 bases × 4 volumes × 2 arquiteturas), totalizando 80 medições
+gravadas e 16 aquecimentos, ou 96 execuções de pipeline. O uso de
 `--limpar-resultados` remove os CSVs de campanhas anteriores.
 Por segurança, o orquestrador também recusa iniciar a campanha oficial quando
 a árvore Git contém alterações não registradas.

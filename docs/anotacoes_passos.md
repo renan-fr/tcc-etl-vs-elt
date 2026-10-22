@@ -7,7 +7,7 @@
 - Bases planejadas:
   - ENEM: menor complexidade.
   - TSE: maior complexidade.
-- Volumes planejados: 100k, 500k, 1M e 3M registros.
+- Volumes planejados: 100k, 250k, 500k e 1M registros.
 
 ## Estrutura atual
 
@@ -170,8 +170,8 @@
 
 - Criado `docs/enem/plano_benchmark.md` com o plano de integração do ELT ao
   protocolo experimental.
-- A primeira etapa do benchmark ficara restrita ao ENEM e aos volumes de 100k,
-  500k, 1M e 3M por arquivo, antes da incorporacao da base TSE.
+- A primeira etapa do benchmark ficara restrita ao ENEM e aos volumes definidos
+  por arquivo, antes da incorporacao da base TSE.
 - O trabalho foi dividido em interface de execucao, metricas padronizadas,
   validacao SQL, comparacao de equivalencia e orquestracao das rodadas.
 - A ordem recomendada e validar primeiro um piloto pequeno e somente depois

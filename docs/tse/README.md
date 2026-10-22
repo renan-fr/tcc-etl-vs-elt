@@ -24,10 +24,9 @@ Cada volume utiliza automaticamente:
 data/benchmark/tse/subconjuntos/chaves_<volume>.csv
 ```
 
-Na cópia local de 2024, o limite nominal de 3 milhões esgota as fontes estaduais
-em 1.055.460 linhas de seção. O volume configurado e as linhas efetivamente
-processadas são registrados separadamente; portanto, esse cenário representa o
-teto disponível da fonte, não três milhões de linhas efetivas.
+O gerador preserva a chave lógica completa de cada seção selecionada. Por isso,
+o total efetivo pode ficar ligeiramente acima do limite nominal. O volume
+configurado e as linhas efetivamente processadas são registrados separadamente.
 
 ## Certificação
 
@@ -54,9 +53,9 @@ arquiteturas.
 | Volume nominal | Votos nominais | Votos nulos | Votos de legenda |
 |---:|---:|---:|---:|
 | 100 mil | 361 | 231 | 78 |
+| 250 mil | 697 | 427 | 133 |
 | 500 mil | 1.468 | 921 | 236 |
 | 1 milhão | 2.922 | 1.676 | 539 |
-| 3 milhões | 2.965 | 1.698 | 550 |
 
 Não foram encontradas diferenças em comparecimento, abstenções ou votos
 brancos. As quantidades representam chaves de município, zona e cargo, não a

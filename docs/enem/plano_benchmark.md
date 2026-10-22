@@ -74,7 +74,7 @@ ETL.resultados = ELT.resultados
 
 ## Seleção dos volumes
 
-Os volumes oficiais serão 100 mil, 500 mil, 1 milhão e 3 milhões de linhas por
+Os volumes oficiais serão 100 mil, 250 mil, 500 mil e 1 milhão de linhas por
 arquivo. O limite será aplicado desde o início de cada arquivo, de maneira
 determinística, tanto no ETL quanto no ELT.
 

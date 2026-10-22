@@ -53,7 +53,7 @@ def main() -> None:
         "--volumes",
         nargs="+",
         type=int,
-        default=[100_000, 500_000, 1_000_000, 3_000_000],
+        default=[100_000, 250_000, 500_000, 1_000_000],
     )
     parser.add_argument("--rodadas", type=int, default=5)
     parser.add_argument("--certificar", action="store_true")

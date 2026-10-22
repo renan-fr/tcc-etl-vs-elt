@@ -49,9 +49,9 @@ As bases alternativas definidas anteriormente não participarão inicialmente do
 Cada base será avaliada nos seguintes volumes nominais:
 
 - 100.000;
+- 250.000;
 - 500.000;
-- 1.000.000;
-- 3.000.000.
+- 1.000.000.
 
 Esses valores representam o limite nominal utilizado no experimento. A
 interpretação exata desse limite poderá depender da estrutura do dataset e da
@@ -73,6 +73,11 @@ até 100.000 linhas de participantes
 +
 até 100.000 linhas de resultados
 
+250k:
+até 250.000 linhas de participantes
++
+até 250.000 linhas de resultados
+
 500k:
 até 500.000 linhas de participantes
 +
@@ -83,11 +88,11 @@ até 1.000.000 de linhas de participantes
 +
 até 1.000.000 de linhas de resultados
 
-3M:
-até 3.000.000 de linhas de participantes
-+
-até 3.000.000 de linhas de resultados
 ```
+
+No TSE, o gerador preserva todas as linhas pertencentes às chaves lógicas
+selecionadas. Por isso, o total efetivo pode ficar ligeiramente acima do volume
+nominal e será registrado nas métricas de linhas efetivamente processadas.
 
 Portanto:
 
@@ -567,7 +572,7 @@ RODADA 1
 ENEM | 500k | ELT
 TSE  | 1M   | ETL
 ENEM | 100k | ETL
-TSE  | 3M   | ELT
+TSE  | 250k | ELT
 ...
 
 RODADA 2
@@ -637,7 +642,7 @@ Nesse caso, o segundo hardware será tratado como uma análise adicional de repr
 Os principais fatores deliberadamente modificados serão:
 
 - arquitetura: ETL ou ELT;
-- volume de dados: 100k, 500k, 1M e 3M;
+- volume de dados: 100k, 250k, 500k e 1M;
 - complexidade do processamento, representada pelas características distintas das bases ENEM e TSE.
 
 ### Variáveis dependentes
@@ -699,7 +704,8 @@ Com cinco execuções válidas por combinação:
 16 × 5 = 80 execuções válidas
 ```
 
-Além disso, serão realizadas execuções de aquecimento que não participarão das estatísticas finais.
+Além disso, serão realizadas 16 execuções de aquecimento que não participarão
+das estatísticas finais, totalizando 96 execuções de pipeline na campanha.
 
 ---
 
