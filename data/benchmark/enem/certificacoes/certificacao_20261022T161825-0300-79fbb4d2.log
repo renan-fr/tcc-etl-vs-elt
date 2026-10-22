@@ -1,0 +1,232 @@
+
+=== ENEM | volume=100000 | certificar ===
+Participantes: (100000, 12)
+Resultados: (100000, 18)
+Valores desconhecidos: nenhum
+Valida��o participantes:
+  Erros cr�ticos: nenhum
+  Alertas: nenhum
+Valida��o resultados:
+  Erros cr�ticos: nenhum
+  Alertas:
+  - resultados.nota_cn possui 30879 valores nulos.
+  - resultados.nota_ch possui 26975 valores nulos.
+  - resultados.nota_lc possui 26975 valores nulos.
+  - resultados.nota_mt possui 30879 valores nulos.
+  - resultados.nota_redacao possui 26975 valores nulos.
+  - resultados.nota_media_objetivas possui 31206 valores nulos.
+  - resultados.municipio_escola possui 63768 valores 'N�o informado'.
+  - resultados.uf_escola possui 63768 valores 'N�o informado'.
+  - resultados.dependencia_escola possui 63768 valores 'N�o informado'.
+  - resultados.localizacao_escola possui 63768 valores 'N�o informado'.
+  - resultados.regiao_escola possui 63768 valores 'N�o informado'.
+Carga conclu�da: enem_etl_final.participantes e enem_etl_final.resultados.
+Valida��o participantes:
+  Erros cr�ticos: nenhum
+  Alertas: nenhum
+Valida��o resultados:
+  Erros cr�ticos: nenhum
+  Alertas:
+  - resultados.municipio_escola possui 63768 valores 'N�o informado'.
+  - resultados.uf_escola possui 63768 valores 'N�o informado'.
+  - resultados.dependencia_escola possui 63768 valores 'N�o informado'.
+  - resultados.localizacao_escola possui 63768 valores 'N�o informado'.
+  - resultados.nota_cn possui 30879 valores nulos.
+  - resultados.nota_ch possui 26975 valores nulos.
+  - resultados.nota_lc possui 26975 valores nulos.
+  - resultados.nota_mt possui 30879 valores nulos.
+  - resultados.nota_redacao possui 26975 valores nulos.
+  - resultados.regiao_escola possui 63768 valores 'N�o informado'.
+  - resultados.nota_media_objetivas possui 31206 valores nulos.
+Leitura/preparacao: 1.236s
+Carga RAW: 0.105s
+Transforma��o SQL: 0.654s
+Valida��o: 1.639s
+Total: 3.680s
+participantes: OK
+  estrutura_e_tipos=OK
+  linhas_etl=100000
+  linhas_elt=100000
+  apenas_etl=0
+  apenas_elt=0
+resultados: OK
+  estrutura_e_tipos=OK
+  linhas_etl=100000
+  linhas_elt=100000
+  apenas_etl=0
+  apenas_elt=0
+Equivalencia: OK
+
+=== ENEM | volume=500000 | certificar ===
+Participantes: (500000, 12)
+Resultados: (500000, 18)
+Valores desconhecidos: nenhum
+Valida��o participantes:
+  Erros cr�ticos: nenhum
+  Alertas: nenhum
+Valida��o resultados:
+  Erros cr�ticos: nenhum
+  Alertas:
+  - resultados.nota_cn possui 153285 valores nulos.
+  - resultados.nota_ch possui 134386 valores nulos.
+  - resultados.nota_lc possui 134386 valores nulos.
+  - resultados.nota_mt possui 153285 valores nulos.
+  - resultados.nota_redacao possui 134386 valores nulos.
+  - resultados.nota_media_objetivas possui 155045 valores nulos.
+  - resultados.municipio_escola possui 318827 valores 'N�o informado'.
+  - resultados.uf_escola possui 318827 valores 'N�o informado'.
+  - resultados.dependencia_escola possui 318827 valores 'N�o informado'.
+  - resultados.localizacao_escola possui 318827 valores 'N�o informado'.
+  - resultados.regiao_escola possui 318827 valores 'N�o informado'.
+Carga conclu�da: enem_etl_final.participantes e enem_etl_final.resultados.
+Valida��o participantes:
+  Erros cr�ticos: nenhum
+  Alertas: nenhum
+Valida��o resultados:
+  Erros cr�ticos: nenhum
+  Alertas:
+  - resultados.municipio_escola possui 318827 valores 'N�o informado'.
+  - resultados.uf_escola possui 318827 valores 'N�o informado'.
+  - resultados.dependencia_escola possui 318827 valores 'N�o informado'.
+  - resultados.localizacao_escola possui 318827 valores 'N�o informado'.
+  - resultados.nota_cn possui 153285 valores nulos.
+  - resultados.nota_ch possui 134386 valores nulos.
+  - resultados.nota_lc possui 134386 valores nulos.
+  - resultados.nota_mt possui 153285 valores nulos.
+  - resultados.nota_redacao possui 134386 valores nulos.
+  - resultados.regiao_escola possui 318827 valores 'N�o informado'.
+  - resultados.nota_media_objetivas possui 155045 valores nulos.
+Leitura/preparacao: 6.281s
+Carga RAW: 0.281s
+Transforma��o SQL: 6.776s
+Valida��o: 14.157s
+Total: 27.564s
+participantes: OK
+  estrutura_e_tipos=OK
+  linhas_etl=500000
+  linhas_elt=500000
+  apenas_etl=0
+  apenas_elt=0
+resultados: OK
+  estrutura_e_tipos=OK
+  linhas_etl=500000
+  linhas_elt=500000
+  apenas_etl=0
+  apenas_elt=0
+Equivalencia: OK
+
+=== ENEM | volume=1000000 | certificar ===
+Participantes: (1000000, 12)
+Resultados: (1000000, 18)
+Valores desconhecidos: nenhum
+Valida��o participantes:
+  Erros cr�ticos: nenhum
+  Alertas: nenhum
+Valida��o resultados:
+  Erros cr�ticos: nenhum
+  Alertas:
+  - resultados.nota_cn possui 306479 valores nulos.
+  - resultados.nota_ch possui 268807 valores nulos.
+  - resultados.nota_lc possui 268807 valores nulos.
+  - resultados.nota_mt possui 306479 valores nulos.
+  - resultados.nota_redacao possui 268807 valores nulos.
+  - resultados.nota_media_objetivas possui 309891 valores nulos.
+  - resultados.municipio_escola possui 638242 valores 'N�o informado'.
+  - resultados.uf_escola possui 638242 valores 'N�o informado'.
+  - resultados.dependencia_escola possui 638242 valores 'N�o informado'.
+  - resultados.localizacao_escola possui 638242 valores 'N�o informado'.
+  - resultados.regiao_escola possui 638242 valores 'N�o informado'.
+Carga conclu�da: enem_etl_final.participantes e enem_etl_final.resultados.
+Valida��o participantes:
+  Erros cr�ticos: nenhum
+  Alertas: nenhum
+Valida��o resultados:
+  Erros cr�ticos: nenhum
+  Alertas:
+  - resultados.municipio_escola possui 638242 valores 'N�o informado'.
+  - resultados.uf_escola possui 638242 valores 'N�o informado'.
+  - resultados.dependencia_escola possui 638242 valores 'N�o informado'.
+  - resultados.localizacao_escola possui 638242 valores 'N�o informado'.
+  - resultados.nota_cn possui 306479 valores nulos.
+  - resultados.nota_ch possui 268807 valores nulos.
+  - resultados.nota_lc possui 268807 valores nulos.
+  - resultados.nota_mt possui 306479 valores nulos.
+  - resultados.nota_redacao possui 268807 valores nulos.
+  - resultados.regiao_escola possui 638242 valores 'N�o informado'.
+  - resultados.nota_media_objetivas possui 309891 valores nulos.
+Leitura/preparacao: 12.124s
+Carga RAW: 1.525s
+Transforma��o SQL: 17.248s
+Valida��o: 22.710s
+Total: 53.734s
+participantes: OK
+  estrutura_e_tipos=OK
+  linhas_etl=1000000
+  linhas_elt=1000000
+  apenas_etl=0
+  apenas_elt=0
+resultados: OK
+  estrutura_e_tipos=OK
+  linhas_etl=1000000
+  linhas_elt=1000000
+  apenas_etl=0
+  apenas_elt=0
+Equivalencia: OK
+
+=== ENEM | volume=3000000 | certificar ===
+Participantes: (3000000, 12)
+Resultados: (3000000, 18)
+Valores desconhecidos: nenhum
+Valida��o participantes:
+  Erros cr�ticos: nenhum
+  Alertas: nenhum
+Valida��o resultados:
+  Erros cr�ticos: nenhum
+  Alertas:
+  - resultados.nota_cn possui 919357 valores nulos.
+  - resultados.nota_ch possui 806625 valores nulos.
+  - resultados.nota_lc possui 806625 valores nulos.
+  - resultados.nota_mt possui 919357 valores nulos.
+  - resultados.nota_redacao possui 806625 valores nulos.
+  - resultados.nota_media_objetivas possui 929666 valores nulos.
+  - resultados.municipio_escola possui 1915282 valores 'N�o informado'.
+  - resultados.uf_escola possui 1915282 valores 'N�o informado'.
+  - resultados.dependencia_escola possui 1915282 valores 'N�o informado'.
+  - resultados.localizacao_escola possui 1915282 valores 'N�o informado'.
+  - resultados.regiao_escola possui 1915282 valores 'N�o informado'.
+Carga conclu�da: enem_etl_final.participantes e enem_etl_final.resultados.
+Valida��o participantes:
+  Erros cr�ticos: nenhum
+  Alertas: nenhum
+Valida��o resultados:
+  Erros cr�ticos: nenhum
+  Alertas:
+  - resultados.municipio_escola possui 1915282 valores 'N�o informado'.
+  - resultados.uf_escola possui 1915282 valores 'N�o informado'.
+  - resultados.dependencia_escola possui 1915282 valores 'N�o informado'.
+  - resultados.localizacao_escola possui 1915282 valores 'N�o informado'.
+  - resultados.nota_cn possui 919357 valores nulos.
+  - resultados.nota_ch possui 806625 valores nulos.
+  - resultados.nota_lc possui 806625 valores nulos.
+  - resultados.nota_mt possui 919357 valores nulos.
+  - resultados.nota_redacao possui 806625 valores nulos.
+  - resultados.regiao_escola possui 1915282 valores 'N�o informado'.
+  - resultados.nota_media_objetivas possui 929666 valores nulos.
+Leitura/preparacao: 34.965s
+Carga RAW: 1.142s
+Transforma��o SQL: 54.332s
+Valida��o: 79.345s
+Total: 169.834s
+participantes: OK
+  estrutura_e_tipos=OK
+  linhas_etl=3000000
+  linhas_elt=3000000
+  apenas_etl=0
+  apenas_elt=0
+resultados: OK
+  estrutura_e_tipos=OK
+  linhas_etl=3000000
+  linhas_elt=3000000
+  apenas_etl=0
+  apenas_elt=0
+Equivalencia: OK

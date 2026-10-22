@@ -47,6 +47,9 @@ Os únicos parâmetros do experimento são:
 - `--volumes`: quantidades máximas de linhas por arquivo;
 - `--rodadas`: repetições válidas por volume;
 - `--certificar`: executa validações e equivalência em vez de medir desempenho.
+- `--seed`: seed da ordem reproduzível (padrão `20241027`);
+- `--limpar-resultados`: remove explicitamente resultados anteriores antes de
+  iniciar uma nova campanha.
 
 Conexão e schemas são obtidos do `.env`. Os pipelines são chamados pelo
 orquestrador e não precisam de configuração manual. O aquecimento não é gravado;

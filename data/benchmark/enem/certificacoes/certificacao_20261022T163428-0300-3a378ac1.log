@@ -1,0 +1,58 @@
+
+=== ENEM | volume=100000 | certificar ===
+Participantes: (100000, 12)
+Resultados: (100000, 18)
+Valores desconhecidos: nenhum
+Validação participantes:
+  Erros críticos: nenhum
+  Alertas: nenhum
+Validação resultados:
+  Erros críticos: nenhum
+  Alertas:
+  - resultados.nota_cn possui 30879 valores nulos.
+  - resultados.nota_ch possui 26975 valores nulos.
+  - resultados.nota_lc possui 26975 valores nulos.
+  - resultados.nota_mt possui 30879 valores nulos.
+  - resultados.nota_redacao possui 26975 valores nulos.
+  - resultados.nota_media_objetivas possui 31206 valores nulos.
+  - resultados.municipio_escola possui 63768 valores 'Não informado'.
+  - resultados.uf_escola possui 63768 valores 'Não informado'.
+  - resultados.dependencia_escola possui 63768 valores 'Não informado'.
+  - resultados.localizacao_escola possui 63768 valores 'Não informado'.
+  - resultados.regiao_escola possui 63768 valores 'Não informado'.
+Carga concluída: enem_etl_final.participantes e enem_etl_final.resultados.
+Validação participantes:
+  Erros críticos: nenhum
+  Alertas: nenhum
+Validação resultados:
+  Erros críticos: nenhum
+  Alertas:
+  - resultados.municipio_escola possui 63768 valores 'Não informado'.
+  - resultados.uf_escola possui 63768 valores 'Não informado'.
+  - resultados.dependencia_escola possui 63768 valores 'Não informado'.
+  - resultados.localizacao_escola possui 63768 valores 'Não informado'.
+  - resultados.nota_cn possui 30879 valores nulos.
+  - resultados.nota_ch possui 26975 valores nulos.
+  - resultados.nota_lc possui 26975 valores nulos.
+  - resultados.nota_mt possui 30879 valores nulos.
+  - resultados.nota_redacao possui 26975 valores nulos.
+  - resultados.regiao_escola possui 63768 valores 'Não informado'.
+  - resultados.nota_media_objetivas possui 31206 valores nulos.
+Leitura/preparacao: 1.155s
+Carga RAW: 0.079s
+Transformação SQL: 0.797s
+Validação: 1.483s
+Total: 3.566s
+participantes: OK
+  estrutura_e_tipos=OK
+  linhas_etl=100000
+  linhas_elt=100000
+  apenas_etl=0
+  apenas_elt=0
+resultados: OK
+  estrutura_e_tipos=OK
+  linhas_etl=100000
+  linhas_elt=100000
+  apenas_etl=0
+  apenas_elt=0
+Equivalencia: OK

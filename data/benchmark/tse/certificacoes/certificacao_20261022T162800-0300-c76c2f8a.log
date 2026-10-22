@@ -1,0 +1,144 @@
+
+=== TSE | volume=100000 | certificar ===
+Validacao resultado_municipio_cargo:
+  Erros criticos: nenhum
+  Alertas:
+  - 361 chaves possuem diferenca em votos nominais entre munzona e secoes.
+  - 231 chaves possuem diferenca em votos nulos entre munzona e secoes.
+  - 78 chaves possuem diferenca em votos de legenda entre munzona e secoes.
+Carga concluida: tse_etl_final.resultado_municipio_cargo.
+Munzona: 1357 linhas
+Secao: 111398 linhas
+Candidato: 80082 linhas
+Produto final: 1357 linhas
+Validacao resultado_municipio_cargo:
+  Erros criticos: nenhum
+  Alertas:
+  - 361 chaves possuem diferenca em votos nominais entre munzona e secoes.
+  - 231 chaves possuem diferenca em votos nulos entre munzona e secoes.
+  - 78 chaves possuem diferenca em votos de legenda entre munzona e secoes.
+Munzona: 1357 linhas
+Secao: 111398 linhas
+Candidato: 80082 linhas
+Produto final: 1357 linhas
+Carga RAW: 0.129s
+Transformacao SQL: 1.132s
+Validacao: 0.018s
+Total: 3.013s
+Estrutura e tipos: OK
+Linhas ETL: 1357
+Linhas ELT: 1357
+Linhas apenas no ETL: 0
+Linhas apenas no ELT: 0
+Equivalencia: OK
+
+=== TSE | volume=500000 | certificar ===
+Validacao resultado_municipio_cargo:
+  Erros criticos: nenhum
+  Alertas:
+  - 27 chaves nao possuem candidatos.
+  - 27 chaves possuem diferenca entre votos validos de candidatos e votos nominais validos de munzona.
+  - 1468 chaves possuem diferenca em votos nominais entre munzona e secoes.
+  - 921 chaves possuem diferenca em votos nulos entre munzona e secoes.
+  - 236 chaves possuem diferenca em votos de legenda entre munzona e secoes.
+Carga concluida: tse_etl_final.resultado_municipio_cargo.
+Munzona: 6478 linhas
+Secao: 506386 linhas
+Candidato: 334717 linhas
+Produto final: 6478 linhas
+Validacao resultado_municipio_cargo:
+  Erros criticos: nenhum
+  Alertas:
+  - 27 chaves nao possuem candidatos.
+  - 27 chaves possuem diferenca entre votos validos de candidatos e votos nominais validos de munzona.
+  - 1468 chaves possuem diferenca em votos nominais entre munzona e secoes.
+  - 921 chaves possuem diferenca em votos nulos entre munzona e secoes.
+  - 236 chaves possuem diferenca em votos de legenda entre munzona e secoes.
+Munzona: 6478 linhas
+Secao: 506386 linhas
+Candidato: 334717 linhas
+Produto final: 6478 linhas
+Carga RAW: 0.237s
+Transformacao SQL: 17.675s
+Validacao: 0.151s
+Total: 25.980s
+Estrutura e tipos: OK
+Linhas ETL: 6478
+Linhas ELT: 6478
+Linhas apenas no ETL: 0
+Linhas apenas no ELT: 0
+Equivalencia: OK
+
+=== TSE | volume=1000000 | certificar ===
+Validacao resultado_municipio_cargo:
+  Erros criticos: nenhum
+  Alertas:
+  - 35 chaves nao possuem candidatos.
+  - 35 chaves possuem diferenca entre votos validos de candidatos e votos nominais validos de munzona.
+  - 2922 chaves possuem diferenca em votos nominais entre munzona e secoes.
+  - 1676 chaves possuem diferenca em votos nulos entre munzona e secoes.
+  - 539 chaves possuem diferenca em votos de legenda entre munzona e secoes.
+Carga concluida: tse_etl_final.resultado_municipio_cargo.
+Munzona: 12185 linhas
+Secao: 1046191 linhas
+Candidato: 709862 linhas
+Produto final: 12185 linhas
+Validacao resultado_municipio_cargo:
+  Erros criticos: nenhum
+  Alertas:
+  - 35 chaves nao possuem candidatos.
+  - 35 chaves possuem diferenca entre votos validos de candidatos e votos nominais validos de munzona.
+  - 2922 chaves possuem diferenca em votos nominais entre munzona e secoes.
+  - 1676 chaves possuem diferenca em votos nulos entre munzona e secoes.
+  - 539 chaves possuem diferenca em votos de legenda entre munzona e secoes.
+Munzona: 12185 linhas
+Secao: 1046191 linhas
+Candidato: 709862 linhas
+Produto final: 12185 linhas
+Carga RAW: 0.449s
+Transformacao SQL: 33.419s
+Validacao: 0.281s
+Total: 49.707s
+Estrutura e tipos: OK
+Linhas ETL: 12185
+Linhas ELT: 12185
+Linhas apenas no ETL: 0
+Linhas apenas no ELT: 0
+Equivalencia: OK
+
+=== TSE | volume=3000000 | certificar ===
+Validacao resultado_municipio_cargo:
+  Erros criticos: nenhum
+  Alertas:
+  - 35 chaves nao possuem candidatos.
+  - 35 chaves possuem diferenca entre votos validos de candidatos e votos nominais validos de munzona.
+  - 2965 chaves possuem diferenca em votos nominais entre munzona e secoes.
+  - 1698 chaves possuem diferenca em votos nulos entre munzona e secoes.
+  - 550 chaves possuem diferenca em votos de legenda entre munzona e secoes.
+Carga concluida: tse_etl_final.resultado_municipio_cargo.
+Munzona: 12486 linhas
+Secao: 1055460 linhas
+Candidato: 717251 linhas
+Produto final: 12486 linhas
+Validacao resultado_municipio_cargo:
+  Erros criticos: nenhum
+  Alertas:
+  - 35 chaves nao possuem candidatos.
+  - 35 chaves possuem diferenca entre votos validos de candidatos e votos nominais validos de munzona.
+  - 2965 chaves possuem diferenca em votos nominais entre munzona e secoes.
+  - 1698 chaves possuem diferenca em votos nulos entre munzona e secoes.
+  - 550 chaves possuem diferenca em votos de legenda entre munzona e secoes.
+Munzona: 12486 linhas
+Secao: 1055460 linhas
+Candidato: 717251 linhas
+Produto final: 12486 linhas
+Carga RAW: 0.490s
+Transformacao SQL: 29.187s
+Validacao: 0.196s
+Total: 45.849s
+Estrutura e tipos: OK
+Linhas ETL: 12486
+Linhas ELT: 12486
+Linhas apenas no ETL: 0
+Linhas apenas no ELT: 0
+Equivalencia: OK

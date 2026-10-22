@@ -5,6 +5,7 @@ import csv
 from dataclasses import dataclass
 from datetime import datetime
 from io import StringIO
+import json
 import os
 from pathlib import Path
 import threading
@@ -244,7 +245,7 @@ class MonitorRecursos:
         cpu_python = _cpu(self._processo_python)
         ram_python = _ram(self._processo_python)
         cpu_postgres = sum(_cpu(processo) for processo in processos)
-        ram_postgres = sum(_ram(processo) for processo in processos)
+        ram_postgres = sum(_memoria_privada(processo) for processo in processos)
         self._amostras.append({
             "cpu_python": cpu_python,
             "ram_python": float(ram_python),
@@ -266,6 +267,16 @@ def _ram(processo: psutil.Process) -> int:
     try:
         return processo.memory_info().rss
     except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return 0
+
+
+def _memoria_privada(processo: psutil.Process) -> int:
+    try:
+        memoria = processo.memory_info()
+        if hasattr(memoria, "private"):
+            return memoria.private
+        return processo.memory_full_info().uss
+    except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
         return 0
 
 
@@ -968,9 +979,10 @@ def salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
                 f"O arquivo de benchmark {caminho} esta no formato antigo "
                 "(delimitador ','). Remova-o ou mova-o antes de continuar."
             )
-    campos = list(resultado.__dataclass_fields__)
-    linha = {}
-    for campo in campos:
+    identidade = json.loads(os.environ["BENCHMARK_IDENTIDADE_JSON"])
+    campos = [*identidade, *resultado.__dataclass_fields__]
+    linha = dict(identidade)
+    for campo in resultado.__dataclass_fields__:
         valor = getattr(resultado, campo)
         if isinstance(valor, float):
             casas = 3 if campo.startswith("tempo_") else 2

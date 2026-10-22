@@ -5,6 +5,7 @@ import csv
 from dataclasses import dataclass
 from datetime import datetime
 from io import StringIO
+import json
 import os
 from pathlib import Path
 import threading
@@ -967,10 +968,21 @@ class MonitorRecursos:
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 return 0
 
+        def memoria_privada(processo: psutil.Process) -> int:
+            try:
+                memoria = processo.memory_info()
+                if hasattr(memoria, "private"):
+                    return memoria.private
+                return processo.memory_full_info().uss
+            except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+                return 0
+
         cpu_python = cpu(self._processo_python)
         ram_python = ram(self._processo_python)
         cpu_postgres = sum(cpu(processo) for processo in processos_postgres)
-        ram_postgres = sum(ram(processo) for processo in processos_postgres)
+        ram_postgres = sum(
+            memoria_privada(processo) for processo in processos_postgres
+        )
         self._amostras.append(
             {
                 "cpu_python": cpu_python,
@@ -1008,9 +1020,10 @@ class MonitorRecursos:
 def _salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
     caminho.parent.mkdir(parents=True, exist_ok=True)
     existe = caminho.exists() and caminho.stat().st_size > 0
-    campos = list(resultado.__dataclass_fields__)
-    linha: dict[str, object] = {}
-    for campo in campos:
+    identidade = json.loads(os.environ["BENCHMARK_IDENTIDADE_JSON"])
+    campos = [*identidade, *resultado.__dataclass_fields__]
+    linha: dict[str, object] = dict(identidade)
+    for campo in resultado.__dataclass_fields__:
         valor = getattr(resultado, campo)
         if isinstance(valor, float):
             casas = 3 if campo.startswith("tempo_") else 2

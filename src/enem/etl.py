@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from io import StringIO
+import json
 import os
 from pathlib import Path
 import argparse
@@ -1001,7 +1002,7 @@ class MonitorRecursos:
         cpu_python = _cpu_percentual(self._processo_python)
         ram_python = _memoria_rss(self._processo_python)
         cpu_postgres = sum(_cpu_percentual(p) for p in processos_postgres)
-        ram_postgres = sum(_memoria_rss(p) for p in processos_postgres)
+        ram_postgres = sum(_memoria_privada(p) for p in processos_postgres)
 
         self._amostras.append(
             {
@@ -1085,6 +1086,16 @@ def _memoria_rss(processo: psutil.Process) -> int:
         return 0
 
 
+def _memoria_privada(processo: psutil.Process) -> int:
+    try:
+        memoria = processo.memory_info()
+        if hasattr(memoria, "private"):
+            return memoria.private
+        return processo.memory_full_info().uss
+    except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+        return 0
+
+
 def _media(chave: str, amostras: list[dict[str, float]]) -> float:
     return sum(amostra[chave] for amostra in amostras) / len(amostras)
 
@@ -1111,7 +1122,8 @@ def _salvar_resultado_benchmark(
                 f"O arquivo de benchmark {caminho} esta no formato antigo "
                 "(delimitador ','). Remova-o ou mova-o antes de continuar."
             )
-    linha_formatada = {}
+    identidade = json.loads(os.environ["BENCHMARK_IDENTIDADE_JSON"])
+    linha_formatada = dict(identidade)
     for campo, valor in resultado.__dict__.items():
         if isinstance(valor, float):
             casas = 3 if campo.startswith("tempo_") else 2

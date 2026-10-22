@@ -463,7 +463,17 @@ Serão registrados, sempre que tecnicamente viável:
 - média combinada associada ao pipeline;
 - pico combinado associado ao pipeline.
 
-O consumo total do sistema operacional não será utilizado como principal referência, pois poderá incluir processos externos ao experimento.
+O processo Python será medido por RSS. Para o PostgreSQL será usada a memória
+privada por processo, somada entre os processos do servidor. No Windows, a
+fonte é `private bytes`; em sistemas nos quais esse campo não existe, será usada
+USS (`unique set size`). Ambas evitam contar repetidamente as páginas
+compartilhadas do PostgreSQL. A métrica combinada será RSS do Python mais
+memória privada do PostgreSQL e deverá ser interpretada como memória atribuível
+aos processos, não como consumo físico total do sistema.
+
+O consumo total do sistema operacional não será utilizado como principal
+referência, pois poderá incluir processos externos ao experimento. O tipo de
+métrica usado por componente será registrado em cada linha do resultado.
 
 ---
 
@@ -530,7 +540,8 @@ cenário correspondente, mas não participará das estatísticas finais.
 
 Em cada rodada, todos os cenários previstos serão executados uma vez.
 
-A ordem dos cenários será randomizada em cada rodada. Essa randomização se
+A ordem das 16 combinações de base, volume e arquitetura será randomizada
+globalmente no aquecimento e em cada rodada. Essa randomização se
 aplicará somente à ordem das execuções, nunca aos dados pertencentes a cada
 cenário.
 
@@ -568,7 +579,8 @@ RODADA 5
 Nova ordem randomizada.
 ```
 
-A randomização será reproduzível por meio de uma seed definida no código.
+A randomização será reproduzível pela seed padrão `20241027`, registrada no
+manifesto da campanha e configurável no orquestrador.
 
 Isso evita executar todos os testes ETL primeiro e todos os testes ELT posteriormente, reduzindo possíveis vieses temporais.
 
@@ -592,13 +604,19 @@ Máquina inicialmente definida:
 
 A GPU não terá papel direto no experimento, mas poderá ser registrada como parte da configuração completa da máquina.
 
-Também deverão ser documentados posteriormente:
+Cada campanha registrará automaticamente:
 
 - sistema operacional;
-- tipo e modelo do armazenamento utilizado;
 - versão do Python;
 - versão do PostgreSQL;
-- versão das principais bibliotecas.
+- versões das principais bibliotecas;
+- nome da máquina e processador;
+- commit Git;
+- identificador único `run_id`.
+
+O tipo e modelo do armazenamento deverá ser registrado manualmente junto à
+descrição final da máquina, pois não é identificado de forma portável pelo
+orquestrador.
 
 Durante os benchmarks serão evitadas aplicações ou tarefas pesadas concorrentes.
 
@@ -709,6 +727,16 @@ ram_pico
 quantidade_registros_total
 timestamp
 ```
+
+Cada linha também conterá `run_id`, commit Git, versões do Python e PostgreSQL,
+versões das dependências, identificação da máquina, sistema, processador e a
+definição das métricas de RAM. O plano randomizado completo e a seed ficarão em
+`data/benchmark/campanhas/<run_id>.json`.
+
+Uma campanha oficial só poderá começar com os quatro CSVs de resultado ausentes
+ou vazios. Se houver dados anteriores, o orquestrador interromperá a execução;
+a remoção explícita será feita com `--limpar-resultados`. O orquestrador global
+também exigirá uma árvore Git limpa, salvo uso consciente da opção de exceção.
 
 Quando aplicável, o campo genérico de volume deverá ser complementado ou
 substituído por campos mais específicos. Para a base ENEM, deverão ser
@@ -859,12 +887,9 @@ O desenho experimental principal está definido.
 A decisão de utilizar as camadas `raw`, `staging` e `processed` no TSE já está
 definida e não será tratada como uma pendência arquitetural.
 
-Permanecem como detalhes técnicos a serem fechados durante a exploração e implementação:
+Permanecem como detalhes técnicos de documentação final:
 
-- transformações exatas da base TSE;
-- versões das ferramentas;
 - características do armazenamento da máquina;
-- implementação definitiva do mecanismo de monitoramento;
 - eventual utilização de uma segunda máquina.
 
 Esses pontos não alteram o objetivo central da metodologia e deverão ser registrados assim que forem definidos.

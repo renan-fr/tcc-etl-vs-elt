@@ -24,10 +24,16 @@ Cada volume utiliza automaticamente:
 data/benchmark/tse/subconjuntos/chaves_<volume>.csv
 ```
 
+Na cópia local de 2024, o limite nominal de 3 milhões esgota as fontes estaduais
+em 1.055.460 linhas de seção. O volume configurado e as linhas efetivamente
+processadas são registrados separadamente; portanto, esse cenário representa o
+teto disponível da fonte, não três milhões de linhas efetivas.
+
 ## Certificação
 
 A certificação executa ETL e ELT com validações internas e compara os produtos
-finais:
+finais. Também grava o log completo e um CSV com as contagens de diferenças
+entre `munzona` e seções por volume e arquitetura:
 
 ```powershell
 python src\tse\benchmark.py --certificar
@@ -58,6 +64,9 @@ Os únicos parâmetros do experimento são:
 - `--volumes`: volumes nominais da fonte de seção;
 - `--rodadas`: repetições válidas por volume;
 - `--certificar`: executa validações e equivalência em vez de medir desempenho.
+- `--seed`: seed da ordem reproduzível (padrão `20241027`);
+- `--limpar-resultados`: remove explicitamente resultados anteriores antes de
+  iniciar uma nova campanha.
 
 Conexão, schemas, manifestos e arquivos de saída são inferidos pelo projeto. O
 aquecimento não é gravado; somente as rodadas válidas são adicionadas aos CSVs:
