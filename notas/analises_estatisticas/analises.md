@@ -22,13 +22,14 @@
 | Média | Carga | 9,57 | 0,97 | -89,9% |
 | **Média** | **Total** | **16,92** | **23,20** | **+37,1%** |
 
-### Carga (Anomalia a investigar):
-- No dataset do ENEM tivemos um número assustador na carga do ETL: 18,9 segundos. Em comparação, o ETL do TSE carregou em 0,3 segundos. Uma diferença de 18,6 seg / aumento de 7.028,1%. Acredito ser por conta do ENEM ter de carregar duas tabelas, diferente do TSE que carrega apenas uma. Porém, mesmo assim, a diferença é assustadora, analisarei.
-- No dataset do TSE o número foi próximo. O ETL registrou 0,3 segundos enquanto que o ELT 0,9 segundos (diferença de 0,7 segundos / aumento de 247,1%).
-
 ### Leitura e transformação:
 - No ELT, em ambos a leitura e transformação registraram tempos superiores. No TSE, correspondendo a leitura e transformação respectivamente, tivemos 5,4 para 14,8 (diferença de 9,4 seg / aumento de 174,5%) e 5,7 para 12,6 (diferença de 6,8 seg / aumento de 118,4%).
 - No ENEM, na leitura tivemos 1,9 e subimos pra 10,2 (diferença de 8,3 seg / aumento de 434,0%). E na transformação fomos de 1,6 pra 6,7 (diferença de 5,0 seg / aumento de 314,2%).
+
+### Carga:
+- No dataset do ENEM tivemos um número assustador na carga do ETL: 18,9 segundos. Em comparação, o ETL do TSE carregou em 0,3 segundos. Uma diferença de 18,6 seg / aumento de 7.028,1%. Acredito ser por conta do ENEM ter de carregar duas tabelas, diferente do TSE que carrega apenas uma. Porém, mesmo assim, a diferença é assustadora, analisarei.
+- A diferença também é explicada pela quantidade efetivamente carregada: no ENEM ETL, o volume cresce até aproximadamente 2 milhões de linhas, pois são carregadas as tabelas de participantes e resultados. Já no TSE ETL, apesar de o maior cenário possuir mais de 1,7 milhão de linhas de entrada, a carga envia somente o produto agregado, com cerca de 12 mil linhas. Portanto, a comparação da etapa de carga entre os datasets deve considerar a cardinalidade do produto carregado, e não apenas o volume nominal configurado.
+- No dataset do TSE o número foi próximo. O ETL registrou 0,3 segundos enquanto que o ELT 0,9 segundos (diferença de 0,7 segundos / aumento de 247,1%).
 
 ### Tempos totais:
 - Quanto aos tempos totais, no dataset do ENEM tivemos 22,4 de tempo total do ETL e 18,1 do ELT (diferença de 4,4 seg / redução de 19,5%). O elevadíssimo tempo de carga do ETL nesse dataset foi o que compensou as vantagens do ETL nas outras etapas.
