@@ -1012,9 +1012,9 @@ def finalizar_benchmark(
     rodada,
     caminho_csv: Path | None,
 ) -> None:
+    tempo_total = time.perf_counter() - inicio_total
     recursos = monitor.parar()
     quantidade = tempos.linhas_participantes + tempos.linhas_resultados
-    tempo_total = time.perf_counter() - inicio_total
     resultado = ResultadoBenchmark(
         dataset="enem", volume_configurado=limite, arquitetura="elt",
         rodada=rodada, tempo_leitura=tempos.leitura,
