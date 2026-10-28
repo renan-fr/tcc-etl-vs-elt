@@ -1,0 +1,1098 @@
+from __future__ import annotations
+
+import argparse
+import csv
+from dataclasses import dataclass
+from datetime import datetime
+from io import StringIO
+import os
+from pathlib import Path
+import threading
+import time
+from typing import Iterator
+
+import psycopg2
+import psutil
+from psycopg2 import sql
+from dotenv import load_dotenv
+
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+PASTA_ENEM = BASE_DIR / "data" / "raw" / "enem" / "microdados_enem_2024" / "DADOS"
+CAMINHO_PARTICIPANTES = PASTA_ENEM / "PARTICIPANTES_2024.csv"
+CAMINHO_RESULTADOS = PASTA_ENEM / "RESULTADOS_2024.csv"
+
+SCHEMA_RAW = "enem_elt_raw"
+SCHEMA_FINAL = "enem_elt_final"
+TABELA_RAW_PARTICIPANTES = "participantes"
+TABELA_RAW_RESULTADOS = "resultados"
+TABELA_FINAL_PARTICIPANTES = "participantes"
+TABELA_FINAL_RESULTADOS = "resultados"
+
+COLUNAS_PARTICIPANTES = [
+    "NU_INSCRICAO", "TP_FAIXA_ETARIA", "TP_SEXO", "TP_COR_RACA",
+    "TP_ST_CONCLUSAO", "IN_TREINEIRO", "NO_MUNICIPIO_PROVA", "SG_UF_PROVA",
+    "Q007", "Q020", "Q023",
+]
+
+COLUNAS_RESULTADOS = [
+    "NU_SEQUENCIAL", "NO_MUNICIPIO_ESC", "SG_UF_ESC", "TP_DEPENDENCIA_ADM_ESC",
+    "TP_LOCALIZACAO_ESC", "TP_PRESENCA_CN", "TP_PRESENCA_CH", "TP_PRESENCA_LC",
+    "TP_PRESENCA_MT", "TP_STATUS_REDACAO", "NU_NOTA_CN", "NU_NOTA_CH",
+    "NU_NOTA_LC", "NU_NOTA_MT", "NU_NOTA_REDACAO",
+]
+
+CONTRATO_PARTICIPANTES = [
+    ("id_participante", "text"),
+    ("faixa_etaria", "text"),
+    ("sexo", "text"),
+    ("cor_raca", "text"),
+    ("situacao_conclusao", "text"),
+    ("treineiro", "boolean"),
+    ("municipio_prova", "text"),
+    ("uf_prova", "text"),
+    ("faixa_renda", "text"),
+    ("possui_internet", "boolean"),
+    ("tipo_escola_em", "text"),
+    ("regiao_prova", "text"),
+]
+
+CONTRATO_RESULTADOS = [
+    ("id_resultado", "text"),
+    ("municipio_escola", "text"),
+    ("uf_escola", "text"),
+    ("dependencia_escola", "text"),
+    ("localizacao_escola", "text"),
+    ("presenca_cn", "text"),
+    ("presenca_ch", "text"),
+    ("presenca_lc", "text"),
+    ("presenca_mt", "text"),
+    ("presenca_redacao", "text"),
+    ("nota_cn", "numeric"),
+    ("nota_ch", "numeric"),
+    ("nota_lc", "numeric"),
+    ("nota_mt", "numeric"),
+    ("nota_redacao", "numeric"),
+    ("regiao_escola", "text"),
+    ("nota_media_objetivas", "numeric"),
+    ("presente_completo", "boolean"),
+]
+
+DOMINIOS_PARTICIPANTES = {
+    "faixa_etaria": {
+        "Menor de 17 anos", "17 anos", "18 anos", "19 anos", "20 anos",
+        "21 anos", "22 anos", "23 anos", "24 anos", "25 anos",
+        "Entre 26 e 30 anos", "Entre 31 e 35 anos", "Entre 36 e 40 anos",
+        "Entre 41 e 45 anos", "Entre 46 e 50 anos", "Entre 51 e 55 anos",
+        "Entre 56 e 60 anos", "Entre 61 e 65 anos", "Entre 66 e 70 anos",
+        "Maior de 70 anos", "Não informado",
+    },
+    "sexo": {"Masculino", "Feminino", "Não informado"},
+    "cor_raca": {
+        "Não declarado", "Branca", "Preta", "Parda", "Amarela", "Indígena",
+        "Não dispõe da informação", "Não informado",
+    },
+    "situacao_conclusao": {
+        "Já concluí o Ensino Médio",
+        "Estou cursando e concluirei o Ensino Médio em 2024",
+        "Estou cursando e concluirei o Ensino Médio após 2024",
+        "Não concluí e não estou cursando o Ensino Médio",
+        "Não informado",
+    },
+    "faixa_renda": {
+        "Nenhuma Renda", "Até R$ 1.412,00", "De R$ 1.412,01 até R$ 2.118,00",
+        "De R$ 2.118,01 até R$ 2.824,00", "De R$ 2.824,01 até R$ 3.530,00",
+        "De R$ 3.530,01 até R$ 4.236,00", "De R$ 4.236,01 até R$ 5.648,00",
+        "De R$ 5.648,01 até R$ 7.060,00", "De R$ 7.060,01 até R$ 8.472,00",
+        "De R$ 8.472,01 até R$ 9.884,00", "De R$ 9.884,01 até R$ 11.296,00",
+        "De R$ 11.296,01 até R$ 12.708,00", "De R$ 12.708,01 até R$ 14.120,00",
+        "De R$ 14.120,01 até R$ 16.944,00", "De R$ 16.944,01 até R$ 21.180,00",
+        "De R$ 21.180,01 até R$ 28.240,00", "Acima de R$ 28.240,00",
+        "Não informado",
+    },
+    "tipo_escola_em": {
+        "Somente em escola pública",
+        "Parte em escola pública e parte em escola privada sem bolsa integral",
+        "Parte em escola pública e parte em escola privada com bolsa integral",
+        "Somente em escola privada sem bolsa integral",
+        "Somente em escola privada com bolsa integral",
+        "Não frequentei escola de Ensino Médio",
+        "Não informado",
+    },
+    "regiao_prova": {"Norte", "Nordeste", "Centro-Oeste", "Sudeste", "Sul", "Não informado"},
+}
+
+DOMINIOS_RESULTADOS = {
+    "dependencia_escola": {"Federal", "Estadual", "Municipal", "Privada", "Não informado"},
+    "localizacao_escola": {"Urbana", "Rural", "Não informado"},
+    "presenca_cn": {"Faltou à prova", "Presente na prova", "Eliminado na prova", "Não informado"},
+    "presenca_ch": {"Faltou à prova", "Presente na prova", "Eliminado na prova", "Não informado"},
+    "presenca_lc": {"Faltou à prova", "Presente na prova", "Eliminado na prova", "Não informado"},
+    "presenca_mt": {"Faltou à prova", "Presente na prova", "Eliminado na prova", "Não informado"},
+    "presenca_redacao": {"Faltou à prova", "Presente na prova", "Eliminado na prova", "Não informado"},
+    "regiao_escola": {"Norte", "Nordeste", "Centro-Oeste", "Sudeste", "Sul", "Não informado"},
+}
+
+COLUNAS_NOTAS = [
+    "nota_cn", "nota_ch", "nota_lc", "nota_mt", "nota_redacao",
+    "nota_media_objetivas",
+]
+
+
+@dataclass(frozen=True)
+class TemposELT:
+    leitura: float
+    carga_raw: float
+    transformacao_sql: float
+    validacao: float | None
+    total: float
+    linhas_participantes: int
+    linhas_resultados: int
+
+
+@dataclass(frozen=True)
+class ResultadoBenchmark:
+    dataset: str
+    volume_configurado: int | None
+    arquitetura: str
+    rodada: int | None
+    tempo_leitura: float
+    tempo_transformacao: float
+    tempo_carga: float
+    tempo_total: float
+    throughput: float
+    cpu_media_python: float
+    cpu_pico_python: float
+    ram_media_python_mb: float
+    ram_pico_python_mb: float
+    cpu_media_postgres: float
+    cpu_pico_postgres: float
+    ram_media_postgres_mb: float
+    ram_pico_postgres_mb: float
+    cpu_media_total: float
+    cpu_pico_total: float
+    ram_media_total_mb: float
+    ram_pico_total_mb: float
+    quantidade_registros: int
+    linhas_participantes: int
+    linhas_resultados: int
+    timestamp: str
+
+
+@dataclass(frozen=True)
+class ResultadoValidacao:
+    tabela: str
+    erros: list[str]
+    alertas: list[str]
+
+    @property
+    def valido(self) -> bool:
+        return not self.erros
+
+
+class MonitorRecursos:
+    def __init__(self, intervalo_segundos: float = 0.5) -> None:
+        self._processo_python = psutil.Process()
+        self._intervalo = intervalo_segundos
+        self._parar = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._amostras: list[dict[str, float]] = []
+
+    def iniciar(self) -> None:
+        self._parar.clear()
+        self._processo_python.cpu_percent(interval=None)
+        self._thread = threading.Thread(target=self._coletar, daemon=True)
+        self._thread.start()
+
+    def parar(self) -> dict[str, float]:
+        self._parar.set()
+        if self._thread:
+            self._thread.join()
+        self._registrar_amostra()
+        chaves = ("cpu_python", "ram_python", "cpu_postgres", "ram_postgres", "cpu_total", "ram_total")
+        if not self._amostras:
+            valores = {chave: [0.0] for chave in chaves}
+        else:
+            valores = {chave: [amostra[chave] for amostra in self._amostras] for chave in chaves}
+        return {
+            "cpu_media_python": sum(valores["cpu_python"]) / len(valores["cpu_python"]),
+            "cpu_pico_python": max(valores["cpu_python"]),
+            "ram_media_python_mb": sum(valores["ram_python"]) / len(valores["ram_python"]) / (1024 * 1024),
+            "ram_pico_python_mb": max(valores["ram_python"]) / (1024 * 1024),
+            "cpu_media_postgres": sum(valores["cpu_postgres"]) / len(valores["cpu_postgres"]),
+            "cpu_pico_postgres": max(valores["cpu_postgres"]),
+            "ram_media_postgres_mb": sum(valores["ram_postgres"]) / len(valores["ram_postgres"]) / (1024 * 1024),
+            "ram_pico_postgres_mb": max(valores["ram_postgres"]) / (1024 * 1024),
+            "cpu_media_total": sum(valores["cpu_total"]) / len(valores["cpu_total"]),
+            "cpu_pico_total": max(valores["cpu_total"]),
+            "ram_media_total_mb": sum(valores["ram_total"]) / len(valores["ram_total"]) / (1024 * 1024),
+            "ram_pico_total_mb": max(valores["ram_total"]) / (1024 * 1024),
+        }
+
+    def _coletar(self) -> None:
+        while not self._parar.wait(self._intervalo):
+            self._registrar_amostra()
+
+    def _registrar_amostra(self) -> None:
+        processos = []
+        for processo in psutil.process_iter(["name"]):
+            try:
+                if "postgres" in (processo.info["name"] or "").lower():
+                    processos.append(processo)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        cpu_python = _cpu(self._processo_python)
+        ram_python = _ram(self._processo_python)
+        cpu_postgres = sum(_cpu(processo) for processo in processos)
+        ram_postgres = sum(_memoria_privada(processo) for processo in processos)
+        self._amostras.append({
+            "cpu_python": cpu_python,
+            "ram_python": float(ram_python),
+            "cpu_postgres": cpu_postgres,
+            "ram_postgres": float(ram_postgres),
+            "cpu_total": cpu_python + cpu_postgres,
+            "ram_total": float(ram_python + ram_postgres),
+        })
+
+
+def _cpu(processo: psutil.Process) -> float:
+    try:
+        return processo.cpu_percent(interval=None)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return 0.0
+
+
+def _ram(processo: psutil.Process) -> int:
+    try:
+        return processo.memory_info().rss
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return 0
+
+
+def _memoria_privada(processo: psutil.Process) -> int:
+    try:
+        memoria = processo.memory_info()
+        if hasattr(memoria, "private"):
+            return memoria.private
+        return processo.memory_full_info().uss
+    except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+        return 0
+
+
+def obter_conexao(database_url: str | None = None):
+    if database_url:
+        return psycopg2.connect(database_url)
+    return psycopg2.connect(
+        host=os.getenv("POSTGRES_HOST", "localhost"),
+        port=int(os.getenv("POSTGRES_PORT", "5432")),
+        dbname=os.getenv("POSTGRES_DB"),
+        user=os.getenv("POSTGRES_USER"),
+        password=os.getenv("POSTGRES_PASSWORD"),
+    )
+
+
+def criar_tabela_raw(cursor, schema: str, tabela: str, colunas: list[str]) -> None:
+    cursor.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {};").format(sql.Identifier(schema)))
+    cursor.execute(
+        sql.SQL("DROP TABLE IF EXISTS {}.{};").format(
+            sql.Identifier(schema), sql.Identifier(tabela)
+        )
+    )
+    definicoes = [
+        sql.SQL("{} TEXT").format(sql.Identifier(coluna)) for coluna in colunas
+    ]
+    cursor.execute(
+        sql.SQL("CREATE TABLE {}.{} ({});").format(
+            sql.Identifier(schema), sql.Identifier(tabela), sql.SQL(", ").join(definicoes)
+        )
+    )
+
+
+class FluxoCSVProjetado:
+    """Projeta as colunas do experimento e entrega o CSV ao COPY em blocos."""
+
+    def __init__(
+        self,
+        caminho: Path,
+        colunas: list[str],
+        limite: int | None,
+        linhas_por_bloco: int = 4_096,
+    ) -> None:
+        self._caminho = caminho
+        self._colunas = colunas
+        self._limite = limite
+        self._linhas_por_bloco = linhas_por_bloco
+        self._blocos = self._gerar_blocos()
+        self._pendente = ""
+        self.linhas = 0
+        self.tempo_leitura = 0.0
+        self.tempo_serializacao = 0.0
+
+    def read(self, tamanho: int = -1) -> str:
+        if tamanho is None or tamanho < 0:
+            tamanho = 64 * 1024
+        while len(self._pendente) < tamanho:
+            try:
+                self._pendente += next(self._blocos)
+            except StopIteration:
+                break
+        resultado = self._pendente[:tamanho]
+        self._pendente = self._pendente[tamanho:]
+        return resultado
+
+    def _iterar_linhas(self) -> Iterator[list[str]]:
+        with self._caminho.open("r", encoding="latin-1", newline="") as arquivo:
+            leitor = csv.DictReader(arquivo, delimiter=";")
+            presentes = set(leitor.fieldnames or [])
+            faltantes = sorted(set(self._colunas) - presentes)
+            if faltantes:
+                raise ValueError(
+                    f"{self._caminho.name} sem colunas obrigatorias: "
+                    + ", ".join(faltantes)
+                )
+
+            for numero, linha in enumerate(leitor):
+                if self._limite is not None and numero >= self._limite:
+                    break
+                yield [(linha.get(coluna) or "") for coluna in self._colunas]
+
+    def _gerar_blocos(self) -> Iterator[str]:
+        cabecalho = StringIO()
+        inicio_serializacao = time.perf_counter()
+        csv.writer(
+            cabecalho,
+            delimiter=";",
+            lineterminator="\n",
+        ).writerow(self._colunas)
+        self.tempo_serializacao += time.perf_counter() - inicio_serializacao
+        yield cabecalho.getvalue()
+
+        linhas = self._iterar_linhas()
+        finalizado = False
+        while not finalizado:
+            buffer = StringIO()
+            escritor = csv.writer(
+                buffer,
+                delimiter=";",
+                lineterminator="\n",
+            )
+            quantidade = 0
+            for _ in range(self._linhas_por_bloco):
+                inicio_leitura = time.perf_counter()
+                try:
+                    linha = next(linhas)
+                except StopIteration:
+                    finalizado = True
+                finally:
+                    self.tempo_leitura += time.perf_counter() - inicio_leitura
+                if finalizado:
+                    break
+
+                inicio_serializacao = time.perf_counter()
+                escritor.writerow(linha)
+                self.tempo_serializacao += (
+                    time.perf_counter() - inicio_serializacao
+                )
+                quantidade += 1
+            if quantidade:
+                self.linhas += quantidade
+                yield buffer.getvalue()
+
+
+def carregar_csv_raw(
+    cursor,
+    caminho: Path,
+    schema: str,
+    tabela: str,
+    colunas: list[str],
+    limite: int | None = None,
+) -> tuple[int, float, float]:
+    if limite is not None and limite < 0:
+        raise ValueError("limite deve ser maior ou igual a zero.")
+
+    fluxo = FluxoCSVProjetado(caminho, colunas, limite)
+    inicio_total = time.perf_counter()
+    cursor.copy_expert(
+        sql.SQL("COPY {}.{} ({}) FROM STDIN WITH (FORMAT CSV, HEADER TRUE, DELIMITER ';', NULL '')").format(
+            sql.Identifier(schema),
+            sql.Identifier(tabela),
+            sql.SQL(", ").join(sql.Identifier(coluna) for coluna in colunas),
+        ).as_string(cursor),
+        fluxo,
+    )
+    tempo_total = time.perf_counter() - inicio_total
+
+    tempo_carga = max(0.0, tempo_total - fluxo.tempo_leitura)
+    return fluxo.linhas, fluxo.tempo_leitura, tempo_carga
+
+
+def _case(coluna: str, mapa: dict[str, str], desconhecido: str = "Não informado") -> str:
+    partes = [f"WHEN {coluna} = '{origem}' THEN '{destino}'" for origem, destino in mapa.items()]
+    return "CASE " + " ".join(partes) + f" ELSE '{desconhecido}' END"
+
+
+def transformar_participantes_sql(cursor, schema_raw: str, schema_final: str) -> None:
+    raw = f'"{schema_raw}"."{TABELA_RAW_PARTICIPANTES}"'
+    final = f'"{schema_final}"."{TABELA_FINAL_PARTICIPANTES}"'
+    faixa_etaria = {
+        str(i): nome for i, nome in enumerate([
+            "Menor de 17 anos", "17 anos", "18 anos", "19 anos", "20 anos",
+            "21 anos", "22 anos", "23 anos", "24 anos", "25 anos",
+            "Entre 26 e 30 anos", "Entre 31 e 35 anos", "Entre 36 e 40 anos",
+            "Entre 41 e 45 anos", "Entre 46 e 50 anos", "Entre 51 e 55 anos",
+            "Entre 56 e 60 anos", "Entre 61 e 65 anos", "Entre 66 e 70 anos",
+            "Maior de 70 anos",
+        ], 1)
+    }
+    faixa_etaria_sql = _case('"TP_FAIXA_ETARIA"', faixa_etaria)
+    sql_texto = f"""
+    DROP TABLE IF EXISTS {final};
+    CREATE SCHEMA IF NOT EXISTS "{schema_final}";
+    CREATE TABLE {final} AS
+    SELECT
+        "NU_INSCRICAO"::text AS id_participante,
+        {faixa_etaria_sql} AS faixa_etaria,
+        CASE "TP_SEXO" WHEN 'M' THEN 'Masculino' WHEN 'F' THEN 'Feminino' ELSE 'Não informado' END AS sexo,
+        CASE "TP_COR_RACA" WHEN '0' THEN 'Não declarado' WHEN '1' THEN 'Branca' WHEN '2' THEN 'Preta' WHEN '3' THEN 'Parda' WHEN '4' THEN 'Amarela' WHEN '5' THEN 'Indígena' WHEN '6' THEN 'Não dispõe da informação' ELSE 'Não informado' END AS cor_raca,
+        CASE "TP_ST_CONCLUSAO" WHEN '1' THEN 'Já concluí o Ensino Médio' WHEN '2' THEN 'Estou cursando e concluirei o Ensino Médio em 2024' WHEN '3' THEN 'Estou cursando e concluirei o Ensino Médio após 2024' WHEN '4' THEN 'Não concluí e não estou cursando o Ensino Médio' ELSE 'Não informado' END AS situacao_conclusao,
+        CASE "IN_TREINEIRO" WHEN '0' THEN FALSE WHEN '1' THEN TRUE ELSE NULL END AS treineiro,
+        COALESCE(NULLIF("NO_MUNICIPIO_PROVA", ''), 'Não informado') AS municipio_prova,
+        COALESCE(NULLIF("SG_UF_PROVA", ''), 'Não informado') AS uf_prova,
+        CASE "Q007" WHEN 'A' THEN 'Nenhuma Renda' WHEN 'B' THEN 'Até R$ 1.412,00' WHEN 'C' THEN 'De R$ 1.412,01 até R$ 2.118,00' WHEN 'D' THEN 'De R$ 2.118,01 até R$ 2.824,00' WHEN 'E' THEN 'De R$ 2.824,01 até R$ 3.530,00' WHEN 'F' THEN 'De R$ 3.530,01 até R$ 4.236,00' WHEN 'G' THEN 'De R$ 4.236,01 até R$ 5.648,00' WHEN 'H' THEN 'De R$ 5.648,01 até R$ 7.060,00' WHEN 'I' THEN 'De R$ 7.060,01 até R$ 8.472,00' WHEN 'J' THEN 'De R$ 8.472,01 até R$ 9.884,00' WHEN 'K' THEN 'De R$ 9.884,01 até R$ 11.296,00' WHEN 'L' THEN 'De R$ 11.296,01 até R$ 12.708,00' WHEN 'M' THEN 'De R$ 12.708,01 até R$ 14.120,00' WHEN 'N' THEN 'De R$ 14.120,01 até R$ 16.944,00' WHEN 'O' THEN 'De R$ 16.944,01 até R$ 21.180,00' WHEN 'P' THEN 'De R$ 21.180,01 até R$ 28.240,00' WHEN 'Q' THEN 'Acima de R$ 28.240,00' ELSE 'Não informado' END AS faixa_renda,
+        CASE "Q020" WHEN 'A' THEN FALSE WHEN 'B' THEN TRUE ELSE NULL END AS possui_internet,
+        CASE "Q023" WHEN 'A' THEN 'Somente em escola pública' WHEN 'B' THEN 'Parte em escola pública e parte em escola privada sem bolsa integral'
+             WHEN 'C' THEN 'Parte em escola pública e parte em escola privada com bolsa integral' WHEN 'D' THEN 'Somente em escola privada sem bolsa integral'
+             WHEN 'E' THEN 'Somente em escola privada com bolsa integral' WHEN 'F' THEN 'Não frequentei escola de Ensino Médio' ELSE 'Não informado' END AS tipo_escola_em,
+        CASE "SG_UF_PROVA" WHEN 'AC' THEN 'Norte' WHEN 'AP' THEN 'Norte' WHEN 'AM' THEN 'Norte' WHEN 'PA' THEN 'Norte' WHEN 'RO' THEN 'Norte' WHEN 'RR' THEN 'Norte' WHEN 'TO' THEN 'Norte'
+             WHEN 'AL' THEN 'Nordeste' WHEN 'BA' THEN 'Nordeste' WHEN 'CE' THEN 'Nordeste' WHEN 'MA' THEN 'Nordeste' WHEN 'PB' THEN 'Nordeste' WHEN 'PE' THEN 'Nordeste' WHEN 'PI' THEN 'Nordeste' WHEN 'RN' THEN 'Nordeste' WHEN 'SE' THEN 'Nordeste'
+             WHEN 'DF' THEN 'Centro-Oeste' WHEN 'GO' THEN 'Centro-Oeste' WHEN 'MT' THEN 'Centro-Oeste' WHEN 'MS' THEN 'Centro-Oeste'
+             WHEN 'ES' THEN 'Sudeste' WHEN 'MG' THEN 'Sudeste' WHEN 'RJ' THEN 'Sudeste' WHEN 'SP' THEN 'Sudeste'
+             WHEN 'PR' THEN 'Sul' WHEN 'RS' THEN 'Sul' WHEN 'SC' THEN 'Sul' ELSE 'Não informado' END AS regiao_prova
+    FROM {raw};
+    """
+    cursor.execute(sql_texto)
+
+
+def transformar_resultados_sql(cursor, schema_raw: str, schema_final: str) -> None:
+    raw = f'"{schema_raw}"."{TABELA_RAW_RESULTADOS}"'
+    final = f'"{schema_final}"."{TABELA_FINAL_RESULTADOS}"'
+    sql_texto = f"""
+    DROP TABLE IF EXISTS {final};
+    CREATE SCHEMA IF NOT EXISTS "{schema_final}";
+    CREATE TABLE {final} AS
+    SELECT
+        "NU_SEQUENCIAL"::text AS id_resultado,
+        COALESCE(NULLIF("NO_MUNICIPIO_ESC", ''), 'Não informado') AS municipio_escola,
+        COALESCE(NULLIF("SG_UF_ESC", ''), 'Não informado') AS uf_escola,
+        CASE "TP_DEPENDENCIA_ADM_ESC" WHEN '1' THEN 'Federal' WHEN '2' THEN 'Estadual' WHEN '3' THEN 'Municipal' WHEN '4' THEN 'Privada' ELSE 'Não informado' END AS dependencia_escola,
+        CASE "TP_LOCALIZACAO_ESC" WHEN '1' THEN 'Urbana' WHEN '2' THEN 'Rural' ELSE 'Não informado' END AS localizacao_escola,
+        CASE "TP_PRESENCA_CN" WHEN '0' THEN 'Faltou à prova' WHEN '1' THEN 'Presente na prova' WHEN '2' THEN 'Eliminado na prova' ELSE 'Não informado' END AS presenca_cn,
+        CASE "TP_PRESENCA_CH" WHEN '0' THEN 'Faltou à prova' WHEN '1' THEN 'Presente na prova' WHEN '2' THEN 'Eliminado na prova' ELSE 'Não informado' END AS presenca_ch,
+        CASE "TP_PRESENCA_LC" WHEN '0' THEN 'Faltou à prova' WHEN '1' THEN 'Presente na prova' WHEN '2' THEN 'Eliminado na prova' ELSE 'Não informado' END AS presenca_lc,
+        CASE "TP_PRESENCA_MT" WHEN '0' THEN 'Faltou à prova' WHEN '1' THEN 'Presente na prova' WHEN '2' THEN 'Eliminado na prova' ELSE 'Não informado' END AS presenca_mt,
+        CASE WHEN "TP_STATUS_REDACAO" IS NOT NULL THEN 'Presente na prova' ELSE 'Faltou à prova' END AS presenca_redacao,
+        NULLIF("NU_NOTA_CN", '')::numeric AS nota_cn,
+        NULLIF("NU_NOTA_CH", '')::numeric AS nota_ch,
+        NULLIF("NU_NOTA_LC", '')::numeric AS nota_lc,
+        NULLIF("NU_NOTA_MT", '')::numeric AS nota_mt,
+        NULLIF("NU_NOTA_REDACAO", '')::numeric AS nota_redacao,
+        CASE WHEN "SG_UF_ESC" IN ('AC','AP','AM','PA','RO','RR','TO') THEN 'Norte'
+             WHEN "SG_UF_ESC" IN ('AL','BA','CE','MA','PB','PE','PI','RN','SE') THEN 'Nordeste'
+             WHEN "SG_UF_ESC" IN ('DF','GO','MT','MS') THEN 'Centro-Oeste'
+             WHEN "SG_UF_ESC" IN ('ES','MG','RJ','SP') THEN 'Sudeste'
+             WHEN "SG_UF_ESC" IN ('PR','RS','SC') THEN 'Sul' ELSE 'Não informado' END AS regiao_escola,
+        CASE WHEN media_objetiva_bruta IS NULL THEN NULL ELSE
+             (
+                 CASE
+                     WHEN media_objetiva_bruta * 100 - FLOOR(media_objetiva_bruta * 100) < 0.5
+                         THEN FLOOR(media_objetiva_bruta * 100)
+                     WHEN media_objetiva_bruta * 100 - FLOOR(media_objetiva_bruta * 100) > 0.5
+                         THEN FLOOR(media_objetiva_bruta * 100) + 1
+                     WHEN FLOOR(media_objetiva_bruta * 100) - FLOOR(FLOOR(media_objetiva_bruta * 100) / 2) * 2 = 0
+                         THEN FLOOR(media_objetiva_bruta * 100)
+                     ELSE FLOOR(media_objetiva_bruta * 100) + 1
+                 END
+             ) / 100
+        END::numeric AS nota_media_objetivas,
+        COALESCE(("TP_PRESENCA_CN" = '1' AND "TP_PRESENCA_CH" = '1' AND "TP_PRESENCA_LC" = '1' AND "TP_PRESENCA_MT" = '1' AND "TP_STATUS_REDACAO" IS NOT NULL), FALSE) AS presente_completo
+    FROM (
+        SELECT r.*,
+               CASE
+                   WHEN NULLIF("NU_NOTA_CN", '') IS NOT NULL
+                    AND NULLIF("NU_NOTA_CH", '') IS NOT NULL
+                    AND NULLIF("NU_NOTA_LC", '') IS NOT NULL
+                    AND NULLIF("NU_NOTA_MT", '') IS NOT NULL
+                   THEN (
+                       NULLIF("NU_NOTA_CN", '')::double precision
+                       + NULLIF("NU_NOTA_CH", '')::double precision
+                       + NULLIF("NU_NOTA_LC", '')::double precision
+                       + NULLIF("NU_NOTA_MT", '')::double precision
+                   ) / 4
+               END AS media_objetiva_bruta
+        FROM {raw} r
+    ) origem;
+    """
+    cursor.execute(sql_texto)
+
+
+def _tabela(schema: str, tabela: str):
+    return sql.SQL("{}.{}").format(sql.Identifier(schema), sql.Identifier(tabela))
+
+
+def _contar_linhas(cursor, schema: str, tabela: str) -> int:
+    cursor.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(_tabela(schema, tabela)))
+    return int(cursor.fetchone()[0])
+
+
+def _contar_condicao(
+    cursor,
+    schema: str,
+    tabela: str,
+    condicao,
+) -> int:
+    cursor.execute(
+        sql.SQL("SELECT COUNT(*) FROM {} WHERE {}").format(
+            _tabela(schema, tabela), condicao
+        )
+    )
+    return int(cursor.fetchone()[0])
+
+
+def _obter_estrutura(cursor, schema: str, tabela: str) -> list[tuple[str, str]]:
+    cursor.execute(
+        """
+        SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = %s AND table_name = %s
+        ORDER BY ordinal_position
+        """,
+        (schema, tabela),
+    )
+    return [(str(nome), str(tipo)) for nome, tipo in cursor.fetchall()]
+
+
+def _validar_estrutura(
+    cursor,
+    schema: str,
+    tabela: str,
+    contrato: list[tuple[str, str]],
+    erros: list[str],
+) -> bool:
+    estrutura = _obter_estrutura(cursor, schema, tabela)
+    if estrutura != contrato:
+        erros.append(
+            "Estrutura, ordem ou tipos divergem do contrato. "
+            f"Esperado: {contrato}. Encontrado: {estrutura}."
+        )
+        return False
+    return True
+
+
+def _validar_identificador(
+    cursor,
+    schema: str,
+    tabela: str,
+    coluna: str,
+    erros: list[str],
+) -> None:
+    identificador = sql.Identifier(coluna)
+    nulos = _contar_condicao(
+        cursor,
+        schema,
+        tabela,
+        sql.SQL("{} IS NULL").format(identificador),
+    )
+    cursor.execute(
+        sql.SQL(
+            "SELECT COALESCE(SUM(quantidade - 1), 0) FROM ("
+            "SELECT COUNT(*) AS quantidade FROM {} GROUP BY {} HAVING COUNT(*) > 1"
+            ") duplicados"
+        ).format(_tabela(schema, tabela), identificador)
+    )
+    duplicados = int(cursor.fetchone()[0])
+    if nulos:
+        erros.append(f"{coluna} possui {nulos} valores nulos.")
+    if duplicados:
+        erros.append(f"{coluna} possui {duplicados} valores duplicados.")
+
+
+def _validar_dominios(
+    cursor,
+    schema: str,
+    tabela: str,
+    dominios: dict[str, set[str]],
+    erros: list[str],
+) -> None:
+    for coluna, valores_validos in dominios.items():
+        identificador = sql.Identifier(coluna)
+        valores = sql.SQL(", ").join(
+            sql.Literal(valor) for valor in sorted(valores_validos)
+        )
+        invalidos = _contar_condicao(
+            cursor,
+            schema,
+            tabela,
+            sql.SQL("{} IS NOT NULL AND {} NOT IN ({})").format(
+                identificador, identificador, valores
+            ),
+        )
+        if invalidos:
+            erros.append(f"{coluna} possui {invalidos} valores fora do domínio.")
+
+
+def _case_regiao(coluna: str):
+    grupos = {
+        "Norte": ("AC", "AP", "AM", "PA", "RO", "RR", "TO"),
+        "Nordeste": ("AL", "BA", "CE", "MA", "PB", "PE", "PI", "RN", "SE"),
+        "Centro-Oeste": ("DF", "GO", "MT", "MS"),
+        "Sudeste": ("ES", "MG", "RJ", "SP"),
+        "Sul": ("PR", "RS", "SC"),
+    }
+    casos = []
+    for regiao, ufs in grupos.items():
+        casos.append(
+            sql.SQL("WHEN {} IN ({}) THEN {}").format(
+                sql.Identifier(coluna),
+                sql.SQL(", ").join(sql.Literal(uf) for uf in ufs),
+                sql.Literal(regiao),
+            )
+        )
+    return sql.SQL("CASE {} ELSE {} END").format(
+        sql.SQL(" ").join(casos), sql.Literal("Não informado")
+    )
+
+
+def _validar_regiao(
+    cursor,
+    schema: str,
+    tabela: str,
+    coluna_uf: str,
+    coluna_regiao: str,
+    erros: list[str],
+) -> None:
+    divergentes = _contar_condicao(
+        cursor,
+        schema,
+        tabela,
+        sql.SQL("{} <> {} AND {} IS DISTINCT FROM ({})").format(
+            sql.Identifier(coluna_uf),
+            sql.Literal("Não informado"),
+            sql.Identifier(coluna_regiao),
+            _case_regiao(coluna_uf),
+        ),
+    )
+    if divergentes:
+        erros.append(
+            f"{coluna_uf} e {coluna_regiao} possuem "
+            f"{divergentes} combinações inconsistentes."
+        )
+
+
+def _adicionar_alertas_ausencias(
+    cursor,
+    schema: str,
+    tabela: str,
+    contrato: list[tuple[str, str]],
+    alertas: list[str],
+) -> None:
+    for coluna, tipo in contrato:
+        identificador = sql.Identifier(coluna)
+        nulos = _contar_condicao(
+            cursor, schema, tabela, sql.SQL("{} IS NULL").format(identificador)
+        )
+        if nulos:
+            alertas.append(f"{tabela}.{coluna} possui {nulos} valores nulos.")
+        if tipo == "text":
+            nao_informados = _contar_condicao(
+                cursor,
+                schema,
+                tabela,
+                sql.SQL("{} = {}").format(
+                    identificador, sql.Literal("Não informado")
+                ),
+            )
+            if nao_informados:
+                alertas.append(
+                    f"{tabela}.{coluna} possui {nao_informados} valores "
+                    "'Não informado'."
+                )
+
+
+def validar_participantes(
+    cursor,
+    schema: str,
+    linhas_origem: int,
+) -> ResultadoValidacao:
+    tabela = TABELA_FINAL_PARTICIPANTES
+    erros: list[str] = []
+    alertas: list[str] = []
+    if not _validar_estrutura(
+        cursor, schema, tabela, CONTRATO_PARTICIPANTES, erros
+    ):
+        return ResultadoValidacao(tabela, erros, alertas)
+
+    linhas_finais = _contar_linhas(cursor, schema, tabela)
+    if linhas_finais != linhas_origem:
+        erros.append(
+            f"Quantidade de linhas divergente: origem={linhas_origem}, "
+            f"final={linhas_finais}."
+        )
+    _validar_identificador(
+        cursor, schema, tabela, "id_participante", erros
+    )
+    _validar_dominios(
+        cursor, schema, tabela, DOMINIOS_PARTICIPANTES, erros
+    )
+    _validar_regiao(
+        cursor, schema, tabela, "uf_prova", "regiao_prova", erros
+    )
+    _adicionar_alertas_ausencias(
+        cursor, schema, tabela, CONTRATO_PARTICIPANTES, alertas
+    )
+    return ResultadoValidacao(tabela, erros, alertas)
+
+
+def _validar_media_objetivas(
+    cursor,
+    schema: str,
+    tabela: str,
+    erros: list[str],
+) -> None:
+    tabela_sql = _tabela(schema, tabela)
+    cursor.execute(
+        sql.SQL(
+            """
+            SELECT COUNT(*)
+            FROM (
+                SELECT *,
+                    (
+                        nota_cn::double precision
+                        + nota_ch::double precision
+                        + nota_lc::double precision
+                        + nota_mt::double precision
+                    ) / 4 AS media_bruta
+                FROM {}
+            ) dados
+            WHERE nota_media_objetivas IS DISTINCT FROM
+                CASE
+                    WHEN media_bruta IS NULL THEN NULL
+                    ELSE (
+                        CASE
+                            WHEN media_bruta * 100 - FLOOR(media_bruta * 100) < 0.5
+                                THEN FLOOR(media_bruta * 100)
+                            WHEN media_bruta * 100 - FLOOR(media_bruta * 100) > 0.5
+                                THEN FLOOR(media_bruta * 100) + 1
+                            WHEN FLOOR(media_bruta * 100)
+                                - FLOOR(FLOOR(media_bruta * 100) / 2) * 2 = 0
+                                THEN FLOOR(media_bruta * 100)
+                            ELSE FLOOR(media_bruta * 100) + 1
+                        END
+                    ) / 100
+                END
+            """
+        ).format(tabela_sql)
+    )
+    divergentes = int(cursor.fetchone()[0])
+    if divergentes:
+        erros.append(
+            "nota_media_objetivas possui "
+            f"{divergentes} valores inconsistentes."
+        )
+
+
+def validar_resultados(
+    cursor,
+    schema: str,
+    linhas_origem: int,
+) -> ResultadoValidacao:
+    tabela = TABELA_FINAL_RESULTADOS
+    erros: list[str] = []
+    alertas: list[str] = []
+    if not _validar_estrutura(cursor, schema, tabela, CONTRATO_RESULTADOS, erros):
+        return ResultadoValidacao(tabela, erros, alertas)
+
+    linhas_finais = _contar_linhas(cursor, schema, tabela)
+    if linhas_finais != linhas_origem:
+        erros.append(
+            f"Quantidade de linhas divergente: origem={linhas_origem}, "
+            f"final={linhas_finais}."
+        )
+    _validar_identificador(cursor, schema, tabela, "id_resultado", erros)
+    _validar_dominios(cursor, schema, tabela, DOMINIOS_RESULTADOS, erros)
+
+    for coluna in COLUNAS_NOTAS:
+        invalidas = _contar_condicao(
+            cursor,
+            schema,
+            tabela,
+            sql.SQL("{} IS NOT NULL AND ({} < 0 OR {} > 1000)").format(
+                sql.Identifier(coluna),
+                sql.Identifier(coluna),
+                sql.Identifier(coluna),
+            ),
+        )
+        if invalidas:
+            erros.append(
+                f"{coluna} possui {invalidas} notas fora do intervalo 0-1000."
+            )
+
+    _validar_regiao(
+        cursor, schema, tabela, "uf_escola", "regiao_escola", erros
+    )
+    _validar_media_objetivas(cursor, schema, tabela, erros)
+
+    presenca_divergente = _contar_condicao(
+        cursor,
+        schema,
+        tabela,
+        sql.SQL(
+            "presente_completo IS DISTINCT FROM ("
+            "presenca_cn = 'Presente na prova' "
+            "AND presenca_ch = 'Presente na prova' "
+            "AND presenca_lc = 'Presente na prova' "
+            "AND presenca_mt = 'Presente na prova' "
+            "AND presenca_redacao = 'Presente na prova')"
+        ),
+    )
+    if presenca_divergente:
+        erros.append(
+            f"presente_completo possui {presenca_divergente} valores inconsistentes."
+        )
+
+    pares_presenca_nota = {
+        "presenca_cn": "nota_cn",
+        "presenca_ch": "nota_ch",
+        "presenca_lc": "nota_lc",
+        "presenca_mt": "nota_mt",
+        "presenca_redacao": "nota_redacao",
+    }
+    for coluna_presenca, coluna_nota in pares_presenca_nota.items():
+        inconsistentes = _contar_condicao(
+            cursor,
+            schema,
+            tabela,
+            sql.SQL("{} <> {} AND {} IS NOT NULL").format(
+                sql.Identifier(coluna_presenca),
+                sql.Literal("Presente na prova"),
+                sql.Identifier(coluna_nota),
+            ),
+        )
+        if inconsistentes:
+            alertas.append(
+                f"{coluna_nota} possui {inconsistentes} notas com "
+                f"{coluna_presenca} diferente de presente."
+            )
+
+    _adicionar_alertas_ausencias(
+        cursor, schema, tabela, CONTRATO_RESULTADOS, alertas
+    )
+    return ResultadoValidacao(tabela, erros, alertas)
+
+
+def _imprimir_validacao(resultado: ResultadoValidacao) -> None:
+    print(f"Validação {resultado.tabela}:")
+    if resultado.valido:
+        print("  Erros críticos: nenhum")
+    else:
+        print("  Erros críticos:")
+        for erro in resultado.erros:
+            print(f"  - {erro}")
+    if resultado.alertas:
+        print("  Alertas:")
+        for alerta in resultado.alertas:
+            print(f"  - {alerta}")
+    else:
+        print("  Alertas: nenhum")
+
+
+def executar_elt(
+    database_url: str | None,
+    limite: int | None,
+    schema_raw: str = SCHEMA_RAW,
+    schema_final: str = SCHEMA_FINAL,
+    validar: bool = True,
+) -> TemposELT:
+    inicio_total = time.perf_counter()
+    with obter_conexao(database_url) as conexao:
+        with conexao.cursor() as cursor:
+            inicio_carga_raw = time.perf_counter()
+            inicio = time.perf_counter()
+            criar_tabela_raw(
+                cursor,
+                schema_raw,
+                TABELA_RAW_PARTICIPANTES,
+                COLUNAS_PARTICIPANTES,
+            )
+            criar_tabela_raw(
+                cursor,
+                schema_raw,
+                TABELA_RAW_RESULTADOS,
+                COLUNAS_RESULTADOS,
+            )
+            linhas_raw_participantes, leitura_participantes, _ = carregar_csv_raw(
+                cursor, CAMINHO_PARTICIPANTES, schema_raw,
+                TABELA_RAW_PARTICIPANTES, COLUNAS_PARTICIPANTES, limite,
+            )
+            linhas_raw_resultados, leitura_resultados, _ = carregar_csv_raw(
+                cursor, CAMINHO_RESULTADOS, schema_raw,
+                TABELA_RAW_RESULTADOS, COLUNAS_RESULTADOS, limite,
+            )
+            conexao.commit()
+            tempo_leitura = leitura_participantes + leitura_resultados
+            tempo_raw_total = time.perf_counter() - inicio_carga_raw
+            tempo_raw = max(0.0, tempo_raw_total - tempo_leitura)
+
+            inicio = time.perf_counter()
+            transformar_participantes_sql(cursor, schema_raw, schema_final)
+            transformar_resultados_sql(cursor, schema_raw, schema_final)
+            conexao.commit()
+            tempo_sql = time.perf_counter() - inicio
+
+            tempo_validacao: float | None = None
+            if validar:
+                inicio = time.perf_counter()
+                validacao_participantes = validar_participantes(
+                    cursor, schema_final, linhas_raw_participantes
+                )
+                validacao_resultados = validar_resultados(
+                    cursor, schema_final, linhas_raw_resultados
+                )
+                tempo_validacao = time.perf_counter() - inicio
+
+                _imprimir_validacao(validacao_participantes)
+                _imprimir_validacao(validacao_resultados)
+                erros = validacao_participantes.erros + validacao_resultados.erros
+                if erros:
+                    raise ValueError(
+                        "Pipeline interrompido por erros críticos de validação."
+                    )
+            else:
+                print("Validação interna ignorada no modo de desempenho.")
+
+            linhas_participantes = linhas_raw_participantes
+            linhas_resultados = linhas_raw_resultados
+
+    return TemposELT(
+        tempo_leitura, tempo_raw, tempo_sql, tempo_validacao, time.perf_counter() - inicio_total,
+        linhas_participantes, linhas_resultados,
+    )
+
+
+def salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    existe = caminho.exists() and caminho.stat().st_size > 0
+    if existe:
+        with caminho.open("r", encoding="utf-8", newline="") as arquivo:
+            cabecalho = arquivo.readline()
+        if ";" not in cabecalho and "," in cabecalho:
+            raise ValueError(
+                f"O arquivo de benchmark {caminho} esta no formato antigo "
+                "(delimitador ','). Remova-o ou mova-o antes de continuar."
+            )
+    campos = ["run_id", *resultado.__dataclass_fields__]
+    linha = {"run_id": os.environ["BENCHMARK_RUN_ID"]}
+    for campo in resultado.__dataclass_fields__:
+        valor = getattr(resultado, campo)
+        if isinstance(valor, float):
+            casas = 3 if campo.startswith("tempo_") else 2
+            valor = str(round(valor, casas)).replace(".", ",")
+        linha[campo] = valor
+    with caminho.open("a", newline="", encoding="utf-8") as arquivo:
+        escritor = csv.DictWriter(arquivo, fieldnames=campos, delimiter=";")
+        if not existe:
+            escritor.writeheader()
+        escritor.writerow(linha)
+
+
+def finalizar_benchmark(
+    monitor,
+    inicio_total,
+    tempos,
+    limite,
+    rodada,
+    caminho_csv: Path | None,
+) -> None:
+    recursos = monitor.parar()
+    quantidade = tempos.linhas_participantes + tempos.linhas_resultados
+    tempo_total = time.perf_counter() - inicio_total
+    resultado = ResultadoBenchmark(
+        dataset="enem", volume_configurado=limite, arquitetura="elt",
+        rodada=rodada, tempo_leitura=tempos.leitura,
+        tempo_transformacao=tempos.transformacao_sql,
+        tempo_carga=tempos.carga_raw, tempo_total=tempo_total,
+        throughput=quantidade / tempo_total if tempo_total else 0.0,
+        quantidade_registros=quantidade, linhas_participantes=tempos.linhas_participantes,
+        linhas_resultados=tempos.linhas_resultados,
+        timestamp=datetime.now().isoformat(timespec="seconds"), **recursos,
+    )
+    if caminho_csv:
+        salvar_benchmark(resultado, caminho_csv)
+        print(f"Resultado do benchmark salvo em: {caminho_csv}")
+
+
+def main() -> None:
+    load_dotenv()
+    parser = argparse.ArgumentParser(description="Pipeline ELT do ENEM 2024")
+    parser.add_argument("--limite", type=int, required=True)
+    parser.add_argument(
+        "--modo",
+        choices=["certificar", "aquecimento", "medir"],
+        required=True,
+    )
+    parser.add_argument("--rodada", type=int)
+    args = parser.parse_args()
+    if args.limite < 1:
+        parser.error("--limite deve ser maior que zero.")
+    if args.modo == "medir" and args.rodada is None:
+        parser.error("--rodada é obrigatória no modo medir.")
+    if args.modo != "medir" and args.rodada is not None:
+        parser.error("--rodada só pode ser usada no modo medir.")
+
+    benchmark = args.modo != "certificar"
+    inicio_total = time.perf_counter()
+    monitor = MonitorRecursos()
+    if benchmark:
+        monitor.iniciar()
+    try:
+        tempos = executar_elt(
+            os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL"),
+            args.limite,
+            os.getenv("POSTGRES_SCHEMA_ENEM_ELT_RAW", SCHEMA_RAW),
+            os.getenv("POSTGRES_SCHEMA_ENEM_ELT_FINAL", SCHEMA_FINAL),
+            validar=args.modo == "certificar",
+        )
+    except (psycopg2.Error, UnicodeError, ValueError) as erro:
+        if benchmark:
+            monitor.parar()
+        raise SystemExit(f"Falha no pipeline ELT do ENEM: {erro}") from erro
+    print(f"Leitura/preparacao: {tempos.leitura:.3f}s")
+    print(f"Carga RAW: {tempos.carga_raw:.3f}s")
+    print(f"Transformação SQL: {tempos.transformacao_sql:.3f}s")
+    if tempos.validacao is None:
+        print("Validação: não executada")
+    else:
+        print(f"Validação: {tempos.validacao:.3f}s")
+    print(f"Total: {tempos.total:.3f}s")
+    if benchmark:
+        caminho_csv = (
+            BASE_DIR
+            / "data"
+            / "benchmark"
+            / "enem"
+            / "resultados"
+            / "enem_elt.csv"
+            if args.modo == "medir"
+            else None
+        )
+        finalizar_benchmark(
+            monitor,
+            inicio_total,
+            tempos,
+            args.limite,
+            args.rodada,
+            caminho_csv,
+        )
+
+
+if __name__ == "__main__":
+    main()

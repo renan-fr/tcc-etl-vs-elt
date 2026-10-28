@@ -1,7 +1,7 @@
-```gitignore
 # Dados brutos
 data/raw/*
 !data/raw/.gitkeep
+# data/benchmark/
 
 # Resultados gerados
 results/*.csv
@@ -19,6 +19,8 @@ __pycache__/
 
 # Variáveis de ambiente
 .env
+AGENTS.md
+docs/anotacoes_passos.md
 
 # Jupyter
 .ipynb_checkpoints/
@@ -30,4 +32,3 @@ __pycache__/
 # Sistema operacional
 .DS_Store
 Thumbs.db
-```
