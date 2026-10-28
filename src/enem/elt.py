@@ -326,6 +326,7 @@ class FluxoCSVProjetado:
         self._pendente = ""
         self.linhas = 0
         self.tempo_leitura = 0.0
+        self.tempo_serializacao = 0.0
 
     def read(self, tamanho: int = -1) -> str:
         if tamanho is None or tamanho < 0:
@@ -357,17 +358,18 @@ class FluxoCSVProjetado:
 
     def _gerar_blocos(self) -> Iterator[str]:
         cabecalho = StringIO()
+        inicio_serializacao = time.perf_counter()
         csv.writer(
             cabecalho,
             delimiter=";",
             lineterminator="\n",
         ).writerow(self._colunas)
+        self.tempo_serializacao += time.perf_counter() - inicio_serializacao
         yield cabecalho.getvalue()
 
         linhas = self._iterar_linhas()
         finalizado = False
         while not finalizado:
-            inicio = time.perf_counter()
             buffer = StringIO()
             escritor = csv.writer(
                 buffer,
@@ -376,13 +378,22 @@ class FluxoCSVProjetado:
             )
             quantidade = 0
             for _ in range(self._linhas_por_bloco):
+                inicio_leitura = time.perf_counter()
                 try:
-                    escritor.writerow(next(linhas))
-                    quantidade += 1
+                    linha = next(linhas)
                 except StopIteration:
                     finalizado = True
+                finally:
+                    self.tempo_leitura += time.perf_counter() - inicio_leitura
+                if finalizado:
                     break
-            self.tempo_leitura += time.perf_counter() - inicio
+
+                inicio_serializacao = time.perf_counter()
+                escritor.writerow(linha)
+                self.tempo_serializacao += (
+                    time.perf_counter() - inicio_serializacao
+                )
+                quantidade += 1
             if quantidade:
                 self.linhas += quantidade
                 yield buffer.getvalue()

@@ -432,7 +432,29 @@ Também serão registrados separadamente:
 - tempo de carga;
 - tempo total.
 
-A leitura do arquivo será incluída no tempo total, mas permanecerá registrada separadamente.
+As etapas serão definidas operacionalmente da seguinte forma:
+
+- `tempo_leitura`: leitura e interpretação dos arquivos de entrada, incluindo
+  seleção de linhas e colunas;
+- `tempo_transformacao`: execução das regras de transformação de negócio;
+- `tempo_carga`: preparação e serialização dos dados para gravação,
+  transferência, operações de escrita, preparação das tabelas de destino e
+  confirmação da transação, quando aplicável;
+- `tempo_total`: tempo completo da execução, medido por um cronômetro
+  independente.
+
+No ETL, a serialização dos `DataFrames` para CSV e o `COPY` das tabelas finais
+pertencem à carga. No ELT, a leitura e a seleção dos registros ocorrem em um
+fluxo incremental durante o `COPY`; o tempo gasto em `next(linhas)` é atribuído
+à leitura, enquanto a serialização por `csv.writer`, o envio, a gravação e o
+`commit` pertencem à carga. O tempo de carga é obtido descontando do intervalo
+da operação somente o tempo atribuído à leitura, evitando dupla contabilização.
+
+Como algumas operações do ELT são intercaladas dentro da chamada ao `COPY`, a
+soma das três etapas pode não coincidir exatamente com o tempo total. Diferenças
+residuais correspondem a custos fora das etapas, como abertura da conexão e
+outras operações de controle, e o `tempo_total` permanece a métrica principal
+de ponta a ponta.
 
 Isso permitirá analisar tanto o pipeline completo quanto o comportamento isolado das etapas.
 

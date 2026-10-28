@@ -105,18 +105,26 @@ No ETL:
 ```text
 tempo_leitura       = leitura dos dois arquivos
 tempo_transformacao = mapeamentos, conversões e regras derivadas em Python
-tempo_carga         = carga das duas tabelas finais no PostgreSQL
+tempo_carga         = preparação, serialização, COPY e confirmação da carga
+                       das duas tabelas finais no PostgreSQL
 tempo_total         = todo o pipeline, da leitura ao fim da carga
 ```
 
 No ELT:
 
 ```text
-tempo_leitura       = leitura e preparação dos dois arquivos
-tempo_carga         = criação e carga das tabelas raw
+tempo_leitura       = leitura, interpretação e seleção dos dois arquivos
+tempo_carga         = preparação dos blocos, serialização, criação e carga
+                       das tabelas raw, incluindo a confirmação da transação
 tempo_transformacao = transformações SQL e criação das tabelas finais
 tempo_total         = todo o pipeline, da leitura ao fim das tabelas finais
 ```
+
+No ELT, a leitura e a serialização ocorrem de forma intercalada durante o
+`COPY`. A instrumentação atribui o tempo de `next(linhas)` à leitura e o tempo
+de `csv.writer.writerow(...)` à carga. O tempo da operação de carga é então
+descontado apenas do tempo de leitura, de modo que a serialização e a gravação
+permaneçam na carga.
 
 O throughput usará a soma das linhas efetivas dos dois arquivos dividida pelo
 tempo total. Antes do benchmark, uma certificação executará as validações

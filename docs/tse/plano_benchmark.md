@@ -174,18 +174,27 @@ No ETL:
 ```text
 tempo_leitura       = leitura dos arquivos e selecao do subconjunto
 tempo_transformacao = staging, agregacoes, ranking, joins e indicadores
-tempo_carga         = carga da tabela processed no PostgreSQL
+tempo_carga         = preparacao, serializacao, COPY e confirmacao da carga
+                       da tabela processed no PostgreSQL
 tempo_total         = todo o pipeline, da leitura ao fim da carga
 ```
 
 No ELT:
 
 ```text
-tempo_leitura       = preparacao da selecao dos arquivos e subconjunto
-tempo_carga         = carga dos arquivos na camada raw
+tempo_leitura       = leitura, interpretacao e selecao dos arquivos e
+                       subconjunto
+tempo_carga         = preparacao dos blocos, serializacao, criacao e carga
+                       dos arquivos na camada raw, incluindo a confirmacao
+                       da transacao
 tempo_transformacao = staging SQL, agregacoes, ranking, joins e processed
 tempo_total         = todo o pipeline, da preparacao ao fim da processed
 ```
+
+No ELT, a leitura e a serializacao ocorrem de forma intercalada durante o
+`COPY`. A instrumentacao atribui o tempo de `next(linhas)` a leitura e o tempo
+de `csv.writer.writerow(...)` a carga. O tempo da operacao de carga e calculado
+descontando apenas o tempo atribuido a leitura.
 
 Antes do benchmark, uma certificacao executara as validacoes internas e a
 verificacao de equivalencia entre ETL e ELT uma vez para cada volume oficial.
