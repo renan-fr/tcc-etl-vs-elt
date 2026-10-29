@@ -1,0 +1,20 @@
+{
+  "run_id": "run_02",
+  "status": "concluida",
+  "inicio": "2026-10-28T22:37:10-03:00",
+  "fim": "2026-10-28T22:59:54-03:00",
+  "commit_git": "f3a91cc81e4946f133dea09d65031e1aa5be55f4",
+  "seed": 20241027,
+  "volumes": [
+    100000,
+    250000,
+    500000,
+    1000000
+  ],
+  "rodadas": 5,
+  "combinacoes": 16,
+  "aquecimentos": 16,
+  "medicoes_validas": 80,
+  "execucoes_previstas": 96,
+  "execucoes_concluidas": 96
+}
