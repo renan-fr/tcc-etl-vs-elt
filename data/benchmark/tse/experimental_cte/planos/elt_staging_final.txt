@@ -1,0 +1,36 @@
+Merge Left Join  (cost=1741.47..2471.05 rows=6478 width=279) (actual time=22.285..35.202 rows=6478.00 loops=1)
+  Output: munzona.ano_eleicao, munzona.cd_eleicao, munzona.nr_turno, munzona.sg_uf, munzona.cd_municipio, munzona.nm_municipio, munzona.nr_zona, munzona.cd_cargo, munzona.ds_cargo, munzona.qt_aptos, munzona.qt_comparecimento, munzona.qt_abstencoes, munzona.qt_total_votos_validos, munzona.qt_votos_nominais_validos, munzona.qt_total_votos_leg_validos, munzona.qt_votos_brancos, munzona.qt_total_votos_nulos, munzona.qt_total_votos_anulados, COALESCE(secao.qt_secoes_processadas, '0'::bigint), COALESCE(secao.qt_comparecimento_secao, '0'::bigint), COALESCE(secao.qt_abstencoes_secao, '0'::bigint), COALESCE(secao.qt_votos_nominais_secao, '0'::bigint), COALESCE(secao.qt_votos_brancos_secao, '0'::bigint), COALESCE(secao.qt_votos_nulos_secao, '0'::bigint), COALESCE(secao.qt_votos_legenda_secao, '0'::bigint), COALESCE(candidato.qt_candidatos, '0'::bigint), COALESCE(candidato.qt_votos_candidatos, '0'::bigint), candidato.nr_candidato_mais_votado, candidato.nm_candidato_mais_votado, candidato.sg_partido_candidato_mais_votado, candidato.qt_votos_candidato_mais_votado, (round(((munzona.qt_comparecimento)::numeric / (NULLIF(munzona.qt_aptos, 0))::numeric), 6))::numeric(9,6), (round(((munzona.qt_abstencoes)::numeric / (NULLIF(munzona.qt_aptos, 0))::numeric), 6))::numeric(9,6), (round(((candidato.qt_votos_candidato_mais_votado)::numeric / (NULLIF(candidato.qt_votos_candidatos, 0))::numeric), 6))::numeric(9,6)
+  Merge Cond: ((munzona.ano_eleicao = candidato.ano_eleicao) AND (munzona.cd_eleicao = candidato.cd_eleicao) AND (munzona.nr_turno = candidato.nr_turno) AND (munzona.cd_municipio = candidato.cd_municipio) AND (munzona.nr_zona = candidato.nr_zona) AND (munzona.cd_cargo = candidato.cd_cargo))
+  Buffers: shared hit=319
+  ->  Merge Left Join  (cost=1169.76..1397.13 rows=6478 width=178) (actual time=18.162..23.099 rows=6478.00 loops=1)
+        Output: munzona.ano_eleicao, munzona.cd_eleicao, munzona.nr_turno, munzona.sg_uf, munzona.cd_municipio, munzona.nm_municipio, munzona.nr_zona, munzona.cd_cargo, munzona.ds_cargo, munzona.qt_aptos, munzona.qt_comparecimento, munzona.qt_abstencoes, munzona.qt_total_votos_validos, munzona.qt_votos_nominais_validos, munzona.qt_total_votos_leg_validos, munzona.qt_votos_brancos, munzona.qt_total_votos_nulos, munzona.qt_total_votos_anulados, secao.qt_secoes_processadas, secao.qt_comparecimento_secao, secao.qt_abstencoes_secao, secao.qt_votos_nominais_secao, secao.qt_votos_brancos_secao, secao.qt_votos_nulos_secao, secao.qt_votos_legenda_secao
+        Merge Cond: ((munzona.ano_eleicao = secao.ano_eleicao) AND (munzona.cd_eleicao = secao.cd_eleicao) AND (munzona.nr_turno = secao.nr_turno) AND (munzona.cd_municipio = secao.cd_municipio) AND (munzona.nr_zona = secao.nr_zona) AND (munzona.cd_cargo = secao.cd_cargo))
+        Buffers: shared hit=220
+        ->  Sort  (cost=601.88..618.08 rows=6478 width=122) (actual time=15.317..15.653 rows=6478.00 loops=1)
+              Output: munzona.ano_eleicao, munzona.cd_eleicao, munzona.nr_turno, munzona.sg_uf, munzona.cd_municipio, munzona.nm_municipio, munzona.nr_zona, munzona.cd_cargo, munzona.ds_cargo, munzona.qt_aptos, munzona.qt_comparecimento, munzona.qt_abstencoes, munzona.qt_total_votos_validos, munzona.qt_votos_nominais_validos, munzona.qt_total_votos_leg_validos, munzona.qt_votos_brancos, munzona.qt_total_votos_nulos, munzona.qt_total_votos_anulados
+              Sort Key: munzona.ano_eleicao, munzona.cd_eleicao, munzona.nr_turno, munzona.cd_municipio, munzona.nr_zona, munzona.cd_cargo
+              Sort Method: quicksort  Memory: 1113kB
+              Buffers: shared hit=127
+              ->  Seq Scan on tse_elt_staging_exp.munzona  (cost=0.00..191.78 rows=6478 width=122) (actual time=0.014..0.439 rows=6478.00 loops=1)
+                    Output: munzona.ano_eleicao, munzona.cd_eleicao, munzona.nr_turno, munzona.sg_uf, munzona.cd_municipio, munzona.nm_municipio, munzona.nr_zona, munzona.cd_cargo, munzona.ds_cargo, munzona.qt_aptos, munzona.qt_comparecimento, munzona.qt_abstencoes, munzona.qt_total_votos_validos, munzona.qt_votos_nominais_validos, munzona.qt_total_votos_leg_validos, munzona.qt_votos_brancos, munzona.qt_total_votos_nulos, munzona.qt_total_votos_anulados
+                    Buffers: shared hit=127
+        ->  Sort  (cost=567.88..584.08 rows=6478 width=82) (actual time=2.827..3.058 rows=6478.00 loops=1)
+              Output: secao.qt_secoes_processadas, secao.qt_comparecimento_secao, secao.qt_abstencoes_secao, secao.qt_votos_nominais_secao, secao.qt_votos_brancos_secao, secao.qt_votos_nulos_secao, secao.qt_votos_legenda_secao, secao.ano_eleicao, secao.cd_eleicao, secao.nr_turno, secao.cd_municipio, secao.nr_zona, secao.cd_cargo
+              Sort Key: secao.ano_eleicao, secao.cd_eleicao, secao.nr_turno, secao.cd_municipio, secao.nr_zona, secao.cd_cargo
+              Sort Method: quicksort  Memory: 850kB
+              Buffers: shared hit=93
+              ->  Seq Scan on tse_elt_staging_exp.secao  (cost=0.00..157.78 rows=6478 width=82) (actual time=0.023..0.852 rows=6478.00 loops=1)
+                    Output: secao.qt_secoes_processadas, secao.qt_comparecimento_secao, secao.qt_abstencoes_secao, secao.qt_votos_nominais_secao, secao.qt_votos_brancos_secao, secao.qt_votos_nulos_secao, secao.qt_votos_legenda_secao, secao.ano_eleicao, secao.cd_eleicao, secao.nr_turno, secao.cd_municipio, secao.nr_zona, secao.cd_cargo
+                    Buffers: shared hit=93
+  ->  Sort  (cost=571.71..587.83 rows=6451 width=85) (actual time=4.094..4.324 rows=6451.00 loops=1)
+        Output: candidato.qt_candidatos, candidato.qt_votos_candidatos, candidato.nr_candidato_mais_votado, candidato.nm_candidato_mais_votado, candidato.sg_partido_candidato_mais_votado, candidato.qt_votos_candidato_mais_votado, candidato.ano_eleicao, candidato.cd_eleicao, candidato.nr_turno, candidato.cd_municipio, candidato.nr_zona, candidato.cd_cargo
+        Sort Key: candidato.ano_eleicao, candidato.cd_eleicao, candidato.nr_turno, candidato.cd_municipio, candidato.nr_zona, candidato.cd_cargo
+        Sort Method: quicksort  Memory: 897kB
+        Buffers: shared hit=99
+        ->  Seq Scan on tse_elt_staging_exp.candidato  (cost=0.00..163.51 rows=6451 width=85) (actual time=0.016..0.841 rows=6451.00 loops=1)
+              Output: candidato.qt_candidatos, candidato.qt_votos_candidatos, candidato.nr_candidato_mais_votado, candidato.nm_candidato_mais_votado, candidato.sg_partido_candidato_mais_votado, candidato.qt_votos_candidato_mais_votado, candidato.ano_eleicao, candidato.cd_eleicao, candidato.nr_turno, candidato.cd_municipio, candidato.nr_zona, candidato.cd_cargo
+              Buffers: shared hit=99
+Planning:
+  Buffers: shared hit=411
+Planning Time: 2.756 ms
+Execution Time: 35.742 ms

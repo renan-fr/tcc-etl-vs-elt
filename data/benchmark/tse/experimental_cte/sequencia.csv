@@ -1,0 +1,17 @@
+ordem;fase;rodada;volume;arquitetura
+1;aquecimento;;500000;elt_staging
+2;aquecimento;;500000;elt_cte
+3;aquecimento;;100000;elt_cte
+4;aquecimento;;100000;elt_staging
+5;medir;1;500000;elt_staging
+6;medir;1;500000;elt_cte
+7;medir;1;100000;elt_cte
+8;medir;1;100000;elt_staging
+9;medir;2;100000;elt_staging
+10;medir;2;500000;elt_staging
+11;medir;2;500000;elt_cte
+12;medir;2;100000;elt_cte
+13;medir;3;500000;elt_cte
+14;medir;3;100000;elt_staging
+15;medir;3;500000;elt_staging
+16;medir;3;100000;elt_cte
