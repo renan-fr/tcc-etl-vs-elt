@@ -17,12 +17,12 @@ As bibliotecas específicas desta geração são Pandas e Matplotlib.
 A partir da raiz do projeto:
 
 ```text
-python graficos/gerar_graficos.py
+python graficos/gerar_graficos.py --run-id oficial_01
 ```
 
-O script lê os quatro arquivos em `data/benchmark/{enem,tse}/resultados/`. Os CSVs são separados por `;` e os tempos usam vírgula como separador decimal. Antes de gerar os arquivos, o script valida colunas, volumes, rodadas, duplicidades e a quantidade de observações por cenário, imprimindo no terminal as contagens e médias.
+O script lê os quatro arquivos em `data/benchmark/campanhas/<run_id>/`. Os CSVs são separados por `;` e os tempos usam vírgula como separador decimal. Antes de gerar os arquivos, o script valida colunas, volumes, rodadas, duplicidades e a quantidade de observações por cenário, imprimindo no terminal as contagens e médias.
 
-As saídas ficam em subpastas temáticas de `graficos/figuras/`. As figuras desta tarefa ficam em `graficos/figuras/tempo_processamento/`:
+As saídas ficam em `data/benchmark/campanhas/<run_id>/graficos/tempo_processamento/`:
 
 - `tempo_medio_geral.pdf`: média por arquitetura;
 - `tempo_medio_dataset.pdf`: média por conjunto de dados e arquitetura;

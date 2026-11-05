@@ -11,14 +11,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from src.benchmark_paths import diretorio_campanha, validar_run_id
+
 BASE_DIR = Path(__file__).resolve().parents[1]
-FIGURAS_DIR = Path(__file__).resolve().parent / "figuras" / "tempo_processamento"
-ARQUIVOS = {
-    ("ENEM", "ETL"): BASE_DIR / "data/benchmark/enem/resultados/enem_etl.csv",
-    ("ENEM", "ELT"): BASE_DIR / "data/benchmark/enem/resultados/enem_elt.csv",
-    ("TSE", "ETL"): BASE_DIR / "data/benchmark/tse/resultados/tse_etl.csv",
-    ("TSE", "ELT"): BASE_DIR / "data/benchmark/tse/resultados/tse_elt.csv",
-}
 CORES = {"ETL": "#2ca25f", "ELT": "#2b6cb0"}
 VOLUMES_ESPERADOS = {100_000, 250_000, 500_000, 1_000_000}
 COLUNAS_OBRIGATORIAS = {"run_id", "dataset", "volume_configurado", "arquitetura", "rodada", "tempo_total"}
@@ -33,9 +28,15 @@ def converter_tempo(serie: pd.Series, caminho: Path) -> pd.Series:
     return valores
 
 
-def carregar_resultados() -> pd.DataFrame:
+def carregar_resultados(campanha_dir: Path) -> pd.DataFrame:
+    arquivos = {
+        ("ENEM", "ETL"): campanha_dir / "enem_etl.csv",
+        ("ENEM", "ELT"): campanha_dir / "enem_elt.csv",
+        ("TSE", "ETL"): campanha_dir / "tse_etl.csv",
+        ("TSE", "ELT"): campanha_dir / "tse_elt.csv",
+    }
     partes = []
-    for (dataset_esperado, arquitetura_esperada), caminho in ARQUIVOS.items():
+    for (dataset_esperado, arquitetura_esperada), caminho in arquivos.items():
         if not caminho.is_file():
             raise FileNotFoundError(f"Arquivo de resultados não encontrado: {caminho}")
         df = pd.read_csv(caminho, sep=";")
@@ -87,13 +88,13 @@ def adicionar_rotulos(ax: plt.Axes, barras) -> None:
                     xytext=(0, 4), textcoords="offset points", ha="center", va="bottom", fontsize=9)
 
 
-def salvar(fig: plt.Figure, nome: str) -> None:
-    FIGURAS_DIR.mkdir(parents=True, exist_ok=True)
-    fig.savefig(FIGURAS_DIR / f"{nome}.pdf", bbox_inches="tight", pad_inches=0.05)
+def salvar(fig: plt.Figure, nome: str, figuras_dir: Path) -> None:
+    figuras_dir.mkdir(parents=True, exist_ok=True)
+    fig.savefig(figuras_dir / f"{nome}.pdf", bbox_inches="tight", pad_inches=0.05)
     plt.close(fig)
 
 
-def gerar_figura_geral(df: pd.DataFrame) -> None:
+def gerar_figura_geral(df: pd.DataFrame, figuras_dir: Path) -> None:
     medias = df.groupby("arquitetura")["tempo_total_s"].mean().reindex(["ETL", "ELT"])
     fig, ax = plt.subplots(figsize=(5.8, 4.0))
     barras = ax.bar(medias.index, medias.values, color=[CORES[a] for a in medias.index], width=0.58)
@@ -101,10 +102,10 @@ def gerar_figura_geral(df: pd.DataFrame) -> None:
     ax.set_xlabel("Arquitetura")
     adicionar_rotulos(ax, barras)
     fig.tight_layout()
-    salvar(fig, "tempo_medio_geral")
+    salvar(fig, "tempo_medio_geral", figuras_dir)
 
 
-def gerar_figura_dataset(df: pd.DataFrame) -> None:
+def gerar_figura_dataset(df: pd.DataFrame, figuras_dir: Path) -> None:
     medias = df.groupby(["dataset", "arquitetura"])["tempo_total_s"].mean().unstack("arquitetura").reindex(index=["ENEM", "TSE"], columns=["ETL", "ELT"])
     fig, ax = plt.subplots(figsize=(6.6, 4.0))
     posicoes, largura = range(len(medias.index)), 0.34
@@ -118,10 +119,10 @@ def gerar_figura_dataset(df: pd.DataFrame) -> None:
     ax.legend(frameon=False, ncols=2)
     adicionar_rotulos(ax, barras)
     fig.tight_layout()
-    salvar(fig, "tempo_medio_dataset")
+    salvar(fig, "tempo_medio_dataset", figuras_dir)
 
 
-def gerar_figura_linhas(df: pd.DataFrame, dataset: str) -> None:
+def gerar_figura_linhas(df: pd.DataFrame, dataset: str, figuras_dir: Path) -> None:
     medias = (
         df[df["dataset"] == dataset]
         .groupby(["volume_configurado", "arquitetura"])["tempo_total_s"]
@@ -146,12 +147,22 @@ def gerar_figura_linhas(df: pd.DataFrame, dataset: str) -> None:
     ax.set_xticks(posicoes, [f"{volume // 1000:,}".replace(",", ".") + " mil" for volume in medias.index])
     ax.legend(frameon=False, ncols=2)
     fig.tight_layout()
-    salvar(fig, f"tempo_medio_volume_{dataset.lower()}")
+    salvar(fig, f"tempo_medio_volume_{dataset.lower()}", figuras_dir)
 
 
 def main() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run-id", required=True)
+    args = parser.parse_args()
     try:
-        df = carregar_resultados()
+        campanha_dir = diretorio_campanha(validar_run_id(args.run_id))
+    except ValueError as erro:
+        parser.error(str(erro))
+    figuras_dir = campanha_dir / "graficos" / "tempo_processamento"
+    try:
+        df = carregar_resultados(campanha_dir)
     except (FileNotFoundError, ValueError, pd.errors.ParserError) as erro:
         print(f"Erro: {erro}", file=sys.stderr)
         return 1
@@ -163,11 +174,11 @@ def main() -> int:
     print(medias.to_frame().round(3).to_string())
     print("\nMédia geral por arquitetura (s):")
     print(df.groupby("arquitetura")["tempo_total_s"].mean().round(3).to_string())
-    gerar_figura_geral(df)
-    gerar_figura_dataset(df)
-    gerar_figura_linhas(df, "ENEM")
-    gerar_figura_linhas(df, "TSE")
-    print(f"\nFiguras salvas em: {FIGURAS_DIR}")
+    gerar_figura_geral(df, figuras_dir)
+    gerar_figura_dataset(df, figuras_dir)
+    gerar_figura_linhas(df, "ENEM", figuras_dir)
+    gerar_figura_linhas(df, "TSE", figuras_dir)
+    print(f"\nFiguras salvas em: {figuras_dir}")
     return 0
 
 

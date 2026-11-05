@@ -49,14 +49,14 @@ Os únicos parâmetros do experimento são:
 - `--certificar`: executa validações e equivalência em vez de medir desempenho.
 - `--seed`: seed da ordem reproduzível (padrão `20241027`);
 - `--run-id`: identificação gravada nas linhas da campanha;
-- `--limpar-resultados`: remove explicitamente resultados anteriores antes de
-  iniciar uma nova campanha.
+- cada campanha recebe um diretório próprio e nunca sobrescreve campanhas
+  anteriores.
 
 Conexão e schemas são obtidos do `.env`. Os pipelines são chamados pelo
 orquestrador e não precisam de configuração manual. O aquecimento não é gravado;
 somente as rodadas válidas são adicionadas aos CSVs:
 
 ```text
-data/benchmark/enem/resultados/enem_etl.csv
-data/benchmark/enem/resultados/enem_elt.csv
+data/benchmark/campanhas/<run_id>/enem_etl.csv
+data/benchmark/campanhas/<run_id>/enem_elt.csv
 ```

@@ -234,7 +234,7 @@ Serão alertas:
 Os resultados do ENEM serão gravados em:
 
 ```text
-data/benchmark/enem/resultados/
+data/benchmark/campanhas/<run_id>/
 ```
 
 ## Schemas e tabelas físicas

@@ -350,7 +350,7 @@ consistencia entre UF e regiao, nao serao reutilizadas no TSE.
 Os resultados futuros do TSE deverao ser gravados em:
 
 ```text
-data/benchmark/tse/resultados/
+data/benchmark/campanhas/<run_id>/
 ```
 
 ## Schemas e tabelas fisicas

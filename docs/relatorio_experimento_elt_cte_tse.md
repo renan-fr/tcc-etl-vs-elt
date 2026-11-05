@@ -26,7 +26,7 @@ sequencialmente.
   randomização e três repetições.
 - `src/tse/experimental/diagnostico_sql.py`: diagnóstico separado com
   `EXPLAIN (ANALYZE, BUFFERS)`.
-- `data/benchmark/tse/experimental_cte/`: resultados, sequência, evidências de
+- `data/benchmark/campanhas/<run_id>/experimental_cte/`: resultados, sequência, evidências de
   validação e planos SQL. Nenhum resultado histórico oficial foi removido ou
   modificado.
 
@@ -109,7 +109,7 @@ existentes; o volume nominal não corta uma chave lógica ao meio.
   preservação da quantidade de linhas continuaram dentro da transformação em
   ambas as arquiteturas.
 
-A sequência completa está em `data/benchmark/tse/experimental_cte/sequencia.csv`.
+A sequência completa está em `data/benchmark/campanhas/<run_id>/experimental_cte/sequencia.csv`.
 Nos aquecimentos a ordem foi: 500k-STAGING, 500k-CTE, 100k-CTE,
 100k-STAGING. Nas medições:
 
@@ -163,7 +163,7 @@ mais estável e diretamente relacionada à implementação ocorreu na etapa SQL.
 
 O diagnóstico foi executado separadamente no volume nominal de 500 mil, para
 não contaminar os tempos principais. Os planos estão em
-`data/benchmark/tse/experimental_cte/planos/`.
+`data/benchmark/campanhas/<run_id>/experimental_cte/planos/`.
 
 - O plano completo das CTEs levou 3.934,035 ms na execução instrumentada.
 - `candidato_tipado`, usado pelos totais e pelo ranking, foi materializado

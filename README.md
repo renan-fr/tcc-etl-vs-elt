@@ -26,34 +26,33 @@ Os dados brutos ficam separados por base em `data/raw/enem` e `data/raw/tse`.
 Os benchmarks utilizam exclusivamente as copias locais armazenadas em
 `data/raw/enem` e `data/raw/tse`. Nenhum dado e baixado durante as execucoes.
 
-Os resultados de benchmark ficam separados em:
+Os resultados de cada campanha ficam separados em:
 
 ```text
-data/benchmark/enem/
-data/benchmark/tse/
+data/benchmark/campanhas/<run_id>/
 ```
 
 ## Campanha oficial
 
 Depois da certificação, a campanha completa deve ser iniciada pelo orquestrador
 global. Ele randomiza ENEM/TSE, volumes e arquiteturas com seed reproduzível,
-identifica os resultados com um `run_id` e exige CSVs de resultado vazios:
+identifica os resultados com um `run_id` e cria um diretório exclusivo:
 
 ```powershell
-python src\benchmark.py --run-id oficial_01 --limpar-resultados
+python src\benchmark.py --run-id oficial_01
 ```
 
 O comando executa um aquecimento e cinco rodadas válidas para cada uma das 16
 combinações (2 bases × 4 volumes × 2 arquiteturas), totalizando 80 medições
 gravadas e 16 aquecimentos, ou 96 execuções de pipeline. O uso de
-`--limpar-resultados` remove os CSVs e os metadados da campanha anterior.
-Por segurança, o orquestrador também recusa iniciar a campanha oficial quando
-a árvore Git contém alterações não registradas.
+Um `run_id` existente é recusado; os resultados anteriores nunca são removidos
+ou sobrescritos. O orquestrador exige uma árvore Git limpa antes de criar a
+campanha.
 
 Os parâmetros e o andamento da campanha ficam centralizados em um único arquivo:
 
 ```text
-data/benchmark/campanha.json
+data/benchmark/campanhas/<run_id>/campanha.json
 ```
 
 O arquivo registra `run_id`, seed, volumes, rodadas, commit Git, contagens,

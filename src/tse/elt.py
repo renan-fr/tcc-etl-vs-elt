@@ -8,11 +8,17 @@ from io import StringIO
 import os
 from pathlib import Path
 import threading
+import sys
 import time
 from typing import Any, Iterator
 
 import psutil
 import psycopg2
+try:
+    from src.benchmark_paths import diretorio_saida_obrigatorio
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from benchmark_paths import diretorio_saida_obrigatorio
 from psycopg2 import sql
 from dotenv import load_dotenv
 
@@ -1204,9 +1210,8 @@ def main() -> None:
     args.benchmark = args.modo != "certificar"
     args.sem_validacao = args.modo != "certificar"
     args.benchmark_output = (
-        BASE_DIR / "data" / "benchmark" / "tse" / "resultados" / "tse_elt.csv"
-        if args.modo == "medir"
-        else None
+        diretorio_saida_obrigatorio() / "tse_elt.csv"
+        if args.modo == "medir" else None
     )
     executar(args)
 

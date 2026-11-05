@@ -9,36 +9,15 @@ import random
 import subprocess
 import sys
 
+try:
+    from src.benchmark_paths import criar_diretorio_campanha, validar_run_id
+except ModuleNotFoundError:  # execução direta: python src/benchmark.py
+    from benchmark_paths import criar_diretorio_campanha, validar_run_id
+
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 VOLUMES_PADRAO = [100_000, 250_000, 500_000, 1_000_000]
 SEED_PADRAO = 20241027
-METADADOS_CAMPANHA = BASE_DIR / "data" / "benchmark" / "campanha.json"
-RESULTADOS = [
-    BASE_DIR
-    / "data"
-    / "benchmark"
-    / dataset
-    / "resultados"
-    / f"{dataset}_{arquitetura}.csv"
-    for dataset in ("enem", "tse")
-    for arquitetura in ("etl", "elt")
-]
-
-
-def preparar_resultados(limpar: bool) -> None:
-    artefatos = [*RESULTADOS, METADADOS_CAMPANHA]
-    existentes = [c for c in artefatos if c.exists() and c.stat().st_size > 0]
-    if existentes and not limpar:
-        lista = "\n".join(f"- {c}" for c in existentes)
-        raise SystemExit(
-            "A campanha deve comecar sem resultados ou metadados anteriores:\n"
-            f"{lista}\nUse --limpar-resultados para remove-los."
-        )
-    for caminho in existentes:
-        caminho.unlink()
-
-
 def agora_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -53,14 +32,14 @@ def obter_commit_git() -> str:
     ).stdout.strip()
 
 
-def salvar_metadados(metadados: dict[str, object]) -> None:
-    METADADOS_CAMPANHA.parent.mkdir(parents=True, exist_ok=True)
-    temporario = METADADOS_CAMPANHA.with_suffix(".json.tmp")
+def salvar_metadados(caminho: Path, metadados: dict[str, object]) -> None:
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    temporario = caminho.with_suffix(".json.tmp")
     temporario.write_text(
         json.dumps(metadados, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    temporario.replace(METADADOS_CAMPANHA)
+    temporario.replace(caminho)
 
 
 def validar_git_limpo() -> None:
@@ -106,13 +85,17 @@ def main() -> None:
     parser.add_argument("--rodadas", type=int, default=5)
     parser.add_argument("--seed", type=int, default=SEED_PADRAO)
     parser.add_argument("--run-id", default="oficial_01")
-    parser.add_argument("--limpar-resultados", action="store_true")
     args = parser.parse_args()
 
     if args.rodadas < 1 or any(volume < 1 for volume in args.volumes):
         parser.error("Volumes e rodadas devem ser maiores que zero.")
-    if not args.run_id.strip():
-        parser.error("--run-id nao pode ser vazio.")
+    try:
+        run_id = validar_run_id(args.run_id)
+    except ValueError as erro:
+        parser.error(str(erro))
+
+    # Deve ocorrer antes de criar, limpar ou alterar qualquer resultado.
+    validar_git_limpo()
 
     ausentes = [
         BASE_DIR
@@ -134,11 +117,17 @@ def main() -> None:
     if ausentes:
         parser.error("Manifestos TSE ausentes:\n" + "\n".join(map(str, ausentes)))
 
-    preparar_resultados(args.limpar_resultados)
-    validar_git_limpo()
+    try:
+        campanha_dir = criar_diretorio_campanha(run_id)
+    except FileExistsError as erro:
+        parser.error(str(erro))
+
+    metadados_caminho = campanha_dir / "campanha.json"
 
     ambiente = os.environ.copy()
-    ambiente["BENCHMARK_RUN_ID"] = args.run_id.strip()
+    ambiente["BENCHMARK_RUN_ID"] = run_id
+    ambiente["BENCHMARK_OUTPUT_DIR"] = str(campanha_dir)
+    ambiente["BENCHMARK_ORCHESTRATOR_RUN_ID"] = run_id
     ambiente["PYTHONIOENCODING"] = "utf-8"
     rng = random.Random(args.seed)
     cenarios = [
@@ -152,13 +141,13 @@ def main() -> None:
         *[("medir", rodada) for rodada in range(1, args.rodadas + 1)],
     ]
 
-    print(f"Campanha: {args.run_id}")
+    print(f"Campanha: {run_id}")
     print(f"Seed: {args.seed}")
     total = len(cenarios) * len(fases)
     aquecimentos = len(cenarios)
     medicoes_validas = len(cenarios) * args.rodadas
     metadados: dict[str, object] = {
-        "run_id": args.run_id.strip(),
+        "run_id": run_id,
         "status": "em_andamento",
         "inicio": agora_iso(),
         "fim": None,
@@ -172,7 +161,7 @@ def main() -> None:
         "execucoes_previstas": total,
         "execucoes_concluidas": 0,
     }
-    salvar_metadados(metadados)
+    salvar_metadados(metadados_caminho, metadados)
     indice = 0
     try:
         for modo, rodada in fases:
@@ -191,19 +180,19 @@ def main() -> None:
                     check=True,
                 )
                 metadados["execucoes_concluidas"] = indice
-                salvar_metadados(metadados)
+                salvar_metadados(metadados_caminho, metadados)
     except BaseException as erro:
         metadados["status"] = (
             "interrompida" if isinstance(erro, KeyboardInterrupt) else "falhou"
         )
         metadados["fim"] = agora_iso()
         metadados["erro"] = f"{type(erro).__name__}: {erro}"
-        salvar_metadados(metadados)
+        salvar_metadados(metadados_caminho, metadados)
         raise
 
     metadados["status"] = "concluida"
     metadados["fim"] = agora_iso()
-    salvar_metadados(metadados)
+    salvar_metadados(metadados_caminho, metadados)
 
 
 if __name__ == "__main__":

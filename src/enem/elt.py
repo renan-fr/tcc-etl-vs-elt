@@ -8,10 +8,16 @@ from io import StringIO
 import os
 from pathlib import Path
 import threading
+import sys
 import time
 from typing import Iterator
 
 import psycopg2
+try:
+    from src.benchmark_paths import diretorio_saida_obrigatorio
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from benchmark_paths import diretorio_saida_obrigatorio
 import psutil
 from psycopg2 import sql
 from dotenv import load_dotenv
@@ -1075,14 +1081,8 @@ def main() -> None:
     print(f"Total: {tempos.total:.3f}s")
     if benchmark:
         caminho_csv = (
-            BASE_DIR
-            / "data"
-            / "benchmark"
-            / "enem"
-            / "resultados"
-            / "enem_elt.csv"
-            if args.modo == "medir"
-            else None
+            diretorio_saida_obrigatorio() / "enem_elt.csv"
+            if args.modo == "medir" else None
         )
         finalizar_benchmark(
             monitor,

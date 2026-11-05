@@ -6,11 +6,18 @@ from io import StringIO
 import os
 from pathlib import Path
 import argparse
+import sys
 import threading
 import time
 from typing import Any
 
 import pandas as pd
+
+try:
+    from src.benchmark_paths import diretorio_saida_obrigatorio
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from benchmark_paths import diretorio_saida_obrigatorio
 import psutil
 import psycopg2
 from psycopg2 import sql
@@ -1334,9 +1341,8 @@ if __name__ == "__main__":
 
     benchmark = args.modo != "certificar"
     benchmark_output = (
-        BASE_DIR / "data" / "benchmark" / "enem" / "resultados" / "enem_etl.csv"
-        if args.modo == "medir"
-        else None
+        diretorio_saida_obrigatorio() / "enem_etl.csv"
+        if args.modo == "medir" else None
     )
 
     main(

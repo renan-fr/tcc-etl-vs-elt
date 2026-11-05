@@ -82,13 +82,13 @@ Os únicos parâmetros do experimento são:
 - `--certificar`: executa validações e equivalência em vez de medir desempenho.
 - `--seed`: seed da ordem reproduzível (padrão `20241027`);
 - `--run-id`: identificação gravada nas linhas da campanha;
-- `--limpar-resultados`: remove explicitamente resultados anteriores antes de
-  iniciar uma nova campanha.
+- cada campanha recebe um diretório próprio e nunca sobrescreve campanhas
+  anteriores.
 
 Conexão, schemas, manifestos e arquivos de saída são inferidos pelo projeto. O
 aquecimento não é gravado; somente as rodadas válidas são adicionadas aos CSVs:
 
 ```text
-data/benchmark/tse/resultados/tse_etl.csv
-data/benchmark/tse/resultados/tse_elt.csv
+data/benchmark/campanhas/<run_id>/tse_etl.csv
+data/benchmark/campanhas/<run_id>/tse_elt.csv
 ```

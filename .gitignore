@@ -1,7 +1,14 @@
 # Dados brutos
 data/raw/*
 !data/raw/.gitkeep
-# data/benchmark/
+# Campanhas e resultados de benchmark (os manifestos TSE continuam versionados)
+data/benchmark/campanhas/*
+data/benchmark/campanha.json
+data/benchmark/enem/resultados/*
+data/benchmark/tse/resultados/*
+data/benchmark/tse/experimental_cte/*
+data/benchmark/tse/experimental_cte/planos/*
+graficos/figuras/*
 
 # Resultados gerados
 results/*.csv

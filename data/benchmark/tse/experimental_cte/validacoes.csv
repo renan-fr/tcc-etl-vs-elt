@@ -1,3 +1,0 @@
-volume;estrutura_igual;linhas_staging;linhas_cte;apenas_staging;apenas_cte;duplicadas_staging;duplicadas_cte;equivalente
-100000;True;1357;1357;0;0;0;0;True
-500000;True;6478;6478;0;0;0;0;True

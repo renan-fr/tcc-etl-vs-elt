@@ -758,14 +758,14 @@ Cada linha também conterá um `run_id`, usado para identificar a campanha à qu
 o resultado pertence. A campanha oficial usará `oficial_01`.
 
 Os metadados comuns serão mantidos em um único arquivo
-`data/benchmark/campanha.json`. Ele registrará `run_id`, seed, volumes, rodadas,
+`data/benchmark/campanhas/<run_id>/campanha.json`. Ele registrará `run_id`, seed, volumes, rodadas,
 commit Git, contagens, horários e estado da campanha. O andamento será atualizado
 nesse mesmo arquivo, sem criar logs individuais por execução.
 
-Uma campanha oficial só poderá começar com os quatro CSVs de resultado e o
-arquivo de metadados ausentes ou vazios. Se houver dados anteriores, o
-orquestrador interromperá a execução; a remoção explícita será feita com
-`--limpar-resultados`. O orquestrador global também exigirá uma árvore Git limpa.
+Cada campanha terá seus quatro CSVs e metadados em um diretório próprio. Se o
+`run_id` já existir, o orquestrador interromperá a execução para impedir
+sobrescrita. O orquestrador global exigirá uma árvore Git limpa antes de criar
+ou alterar resultados.
 
 Quando aplicável, o campo genérico de volume deverá ser complementado ou
 substituído por campos mais específicos. Para a base ENEM, deverão ser
