@@ -8,6 +8,9 @@ results/*.csv
 results/graficos/*
 !results/graficos/.gitkeep
 
+# Resultados dos experimentos de overhead
+data/experimentos/overhead_monitor/
+
 # Ambiente Python
 .venv/
 venv/

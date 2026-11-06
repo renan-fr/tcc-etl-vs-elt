@@ -6,6 +6,7 @@ from io import StringIO
 import os
 from pathlib import Path
 import argparse
+import csv
 import threading
 import time
 from typing import Any
@@ -18,6 +19,12 @@ from dotenv import load_dotenv
 
 
 VALORES_DESCONHECIDOS: list[dict[str, object]] = []
+CAMPOS_RECURSOS = (
+    "cpu_media_python", "cpu_pico_python", "ram_media_python_mb",
+    "ram_pico_python_mb", "cpu_media_postgres", "cpu_pico_postgres",
+    "ram_media_postgres_mb", "ram_pico_postgres_mb", "cpu_media_total",
+    "cpu_pico_total", "ram_media_total_mb", "ram_pico_total_mb",
+)
 VALOR_NAO_INFORMADO = "Não informado"
 
 
@@ -977,6 +984,12 @@ class MonitorRecursos:
         self._parar = threading.Event()
         self._thread: threading.Thread | None = None
         self._amostras: list[dict[str, float]] = []
+        caminho = os.getenv("OVERHEAD_MONITOR_DIAGNOSTICO_OUTPUT")
+        self._caminho_diagnostico = Path(caminho) if caminho else None
+        self._diagnostico_coletas: list[dict[str, object]] | None = (
+            [] if caminho else None
+        )
+        self._ultimo_inicio_periodico_ns: int | None = None
 
     def iniciar(self) -> None:
         self._parar.clear()
@@ -988,12 +1001,91 @@ class MonitorRecursos:
         self._parar.set()
         if self._thread:
             self._thread.join()
-        self._registrar_amostra()
+        if self._diagnostico_coletas is None:
+            self._registrar_amostra()
+        else:
+            self._registrar_amostra_diagnosticada("final")
+        _salvar_numero_amostras(self._amostras)
+        self._salvar_diagnostico_coletas()
         return self._consolidar()
 
     def _coletar(self) -> None:
-        while not self._parar.wait(self.intervalo_segundos):
-            self._registrar_amostra()
+        if self._diagnostico_coletas is None:
+            while not self._parar.wait(self.intervalo_segundos):
+                self._registrar_amostra()
+            return
+
+        intervalo_ns = int(self.intervalo_segundos * 1_000_000_000)
+        while True:
+            inicio_espera_ns = time.perf_counter_ns()
+            if self._parar.wait(self.intervalo_segundos):
+                return
+            fim_espera_ns = time.perf_counter_ns()
+            self._registrar_amostra_diagnosticada(
+                "periodica", inicio_espera_ns, fim_espera_ns, intervalo_ns
+            )
+
+    def _registrar_amostra_diagnosticada(
+        self,
+        origem: str,
+        inicio_espera_ns: int | None = None,
+        fim_espera_ns: int | None = None,
+        intervalo_configurado_ns: int | None = None,
+    ) -> None:
+        inicio_ns = time.perf_counter_ns()
+        self._registrar_amostra()
+        fim_ns = time.perf_counter_ns()
+
+        intervalo_efetivo_ms: float | None = None
+        if origem == "periodica":
+            if self._ultimo_inicio_periodico_ns is not None:
+                intervalo_efetivo_ms = (
+                    inicio_ns - self._ultimo_inicio_periodico_ns
+                ) / 1_000_000
+            self._ultimo_inicio_periodico_ns = inicio_ns
+
+        espera_efetiva_ms = (
+            (fim_espera_ns - inicio_espera_ns) / 1_000_000
+            if inicio_espera_ns is not None and fim_espera_ns is not None
+            else None
+        )
+        atraso_agendamento_ms = (
+            (inicio_ns - inicio_espera_ns - intervalo_configurado_ns) / 1_000_000
+            if inicio_espera_ns is not None
+            and intervalo_configurado_ns is not None
+            else None
+        )
+        assert self._diagnostico_coletas is not None
+        self._diagnostico_coletas.append(
+            {
+                "ordem_coleta": len(self._diagnostico_coletas) + 1,
+                "origem": origem,
+                "inicio_perf_counter_ns": inicio_ns,
+                "duracao_coleta_ms": (fim_ns - inicio_ns) / 1_000_000,
+                "intervalo_efetivo_ms": intervalo_efetivo_ms,
+                "intervalo_configurado_ms": (
+                    intervalo_configurado_ns / 1_000_000
+                    if intervalo_configurado_ns is not None else None
+                ),
+                "espera_efetiva_ms": espera_efetiva_ms,
+                "atraso_agendamento_ms": atraso_agendamento_ms,
+            }
+        )
+
+    def _salvar_diagnostico_coletas(self) -> None:
+        if self._caminho_diagnostico is None or self._diagnostico_coletas is None:
+            return
+        self._caminho_diagnostico.parent.mkdir(parents=True, exist_ok=True)
+        campos = (
+            "ordem_coleta", "origem", "inicio_perf_counter_ns",
+            "duracao_coleta_ms", "intervalo_efetivo_ms",
+            "intervalo_configurado_ms", "espera_efetiva_ms",
+            "atraso_agendamento_ms",
+        )
+        with self._caminho_diagnostico.open("w", encoding="utf-8", newline="") as arquivo:
+            escritor = csv.DictWriter(arquivo, fieldnames=campos)
+            escritor.writeheader()
+            escritor.writerows(self._diagnostico_coletas)
 
     def _registrar_amostra(self) -> None:
         processos_postgres = _obter_processos_postgres()
@@ -1057,6 +1149,25 @@ class MonitorRecursos:
                 _maximo("ram_total", self._amostras)
             ),
         }
+
+
+def _iniciar_monitoramento(
+    benchmark: bool,
+    monitorar_recursos: bool = True,
+    intervalo_segundos: float = 0.5,
+) -> MonitorRecursos | None:
+    if not monitorar_recursos:
+        return None
+    monitor = MonitorRecursos(intervalo_segundos=intervalo_segundos)
+    if benchmark:
+        monitor.iniciar()
+    return monitor
+
+
+def _salvar_numero_amostras(amostras: list[dict[str, float]]) -> None:
+    caminho = os.getenv("OVERHEAD_MONITOR_AMOSTRAS_OUTPUT")
+    if caminho:
+        Path(caminho).write_text(str(len(amostras)), encoding="utf-8")
 
 
 def _obter_processos_postgres() -> list[psutil.Process]:
@@ -1154,10 +1265,10 @@ def _linhas_resumo_benchmark(resultado: ResultadoBenchmark) -> list[str]:
         f"Tempo carga: {resultado.tempo_carga:.3f}s",
         f"Tempo total: {resultado.tempo_total:.3f}s",
         f"Throughput: {resultado.throughput:.2f} registros/s",
-        f"CPU media total: {resultado.cpu_media_total:.2f}%",
-        f"CPU pico total: {resultado.cpu_pico_total:.2f}%",
-        f"RAM media total: {resultado.ram_media_total_mb:.2f} MB",
-        f"RAM pico total: {resultado.ram_pico_total_mb:.2f} MB",
+        "CPU media total: " + (f"{resultado.cpu_media_total:.2f}%" if resultado.cpu_media_total is not None else "nao coletada"),
+        "CPU pico total: " + (f"{resultado.cpu_pico_total:.2f}%" if resultado.cpu_pico_total is not None else "nao coletada"),
+        "RAM media total: " + (f"{resultado.ram_media_total_mb:.2f} MB" if resultado.ram_media_total_mb is not None else "nao coletada"),
+        "RAM pico total: " + (f"{resultado.ram_pico_total_mb:.2f} MB" if resultado.ram_pico_total_mb is not None else "nao coletada"),
     ]
 
 
@@ -1168,7 +1279,7 @@ def _imprimir_resultado_benchmark(resultado: ResultadoBenchmark) -> None:
 
 def _finalizar_benchmark(
     benchmark: bool,
-    monitor: MonitorRecursos,
+    monitor: MonitorRecursos | None,
     inicio_total: float,
     tempo_leitura: float,
     tempo_transformacao: float,
@@ -1183,7 +1294,9 @@ def _finalizar_benchmark(
         return
 
     tempo_total = time.perf_counter() - inicio_total
-    recursos = monitor.parar()
+    recursos = monitor.parar() if monitor is not None else {
+        campo: None for campo in CAMPOS_RECURSOS
+    }
     quantidade_registros = linhas_participantes + linhas_resultados
     throughput = quantidade_registros / tempo_total if tempo_total else 0.0
 
@@ -1219,11 +1332,13 @@ def main(
     benchmark_output: Path | None = None,
     rodada: int | None = None,
     validar: bool = True,
+    monitorar_recursos: bool = True,
+    intervalo_monitoramento: float = 0.5,
 ) -> None:
     inicio_total = time.perf_counter()
-    monitor = MonitorRecursos()
-    if benchmark:
-        monitor.iniciar()
+    monitor = _iniciar_monitoramento(
+        benchmark, monitorar_recursos, intervalo_monitoramento
+    )
 
     limpar_relatorio_valores_desconhecidos()
 
@@ -1265,7 +1380,7 @@ def main(
 
         erros = validacao_participantes.erros + validacao_resultados.erros
         if erros:
-            if benchmark:
+            if benchmark and monitor is not None:
                 monitor.parar()
             raise SystemExit("Carga interrompida por erros críticos de validação.")
     else:
@@ -1274,7 +1389,7 @@ def main(
     try:
         conexao_postgres = obter_conexao_postgres(database_url)
     except ValueError as erro:
-        if benchmark:
+        if benchmark and monitor is not None:
             monitor.parar()
         raise SystemExit(str(erro)) from erro
 
@@ -1322,18 +1437,26 @@ if __name__ == "__main__":
         required=True,
     )
     parser.add_argument("--rodada", type=int)
+    parser.add_argument("--sem-monitoramento", action="store_true")
+    parser.add_argument(
+        "--intervalo-monitoramento", type=float, default=0.5,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument("--benchmark-output", type=Path, help=argparse.SUPPRESS)
 
     args = parser.parse_args()
 
     if args.limite < 1:
         parser.error("--limite deve ser maior que zero.")
+    if args.intervalo_monitoramento <= 0:
+        parser.error("--intervalo-monitoramento deve ser maior que zero.")
     if args.modo == "medir" and args.rodada is None:
         parser.error("--rodada é obrigatória no modo medir.")
     if args.modo != "medir" and args.rodada is not None:
         parser.error("--rodada só pode ser usada no modo medir.")
 
     benchmark = args.modo != "certificar"
-    benchmark_output = (
+    benchmark_output = args.benchmark_output or (
         BASE_DIR / "data" / "benchmark" / "enem" / "resultados" / "enem_etl.csv"
         if args.modo == "medir"
         else None
@@ -1348,4 +1471,6 @@ if __name__ == "__main__":
         benchmark_output=benchmark_output,
         rodada=args.rodada,
         validar=args.modo == "certificar",
+        monitorar_recursos=not args.sem_monitoramento,
+        intervalo_monitoramento=args.intervalo_monitoramento,
     )
