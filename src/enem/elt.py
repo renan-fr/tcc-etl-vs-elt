@@ -998,9 +998,6 @@ def executar_elt(
                     raise ValueError(
                         "Pipeline interrompido por erros críticos de validação."
                     )
-            else:
-                print("Validação interna ignorada no modo de desempenho.")
-
             linhas_participantes = linhas_raw_participantes
             linhas_resultados = linhas_raw_resultados
 
@@ -1039,14 +1036,13 @@ def salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
 
 def finalizar_benchmark(
     monitor: MonitorRecursos | None,
-    inicio_total,
     tempos,
     limite,
     rodada,
     caminho_csv: Path | None,
     modalidade: str,
 ) -> None:
-    tempo_total = time.perf_counter() - inicio_total
+    tempo_total = tempos.total
     recursos = (
         monitor.parar()
         if monitor is not None
@@ -1092,7 +1088,6 @@ def main() -> None:
 
     benchmark = args.modo != "certificar"
     modalidade = "desempenho" if args.sem_monitoramento else "recursos"
-    inicio_total = time.perf_counter()
     monitor = _iniciar_monitoramento(benchmark, not args.sem_monitoramento)
     try:
         tempos = executar_elt(
@@ -1106,6 +1101,8 @@ def main() -> None:
         if monitor is not None:
             monitor.parar()
         raise SystemExit(f"Falha no pipeline ELT do ENEM: {erro}") from erro
+    if tempos.validacao is None:
+        print("Validação interna ignorada no modo de desempenho.")
     print(f"Leitura/preparacao: {tempos.leitura:.3f}s")
     print(f"Carga RAW: {tempos.carga_raw:.3f}s")
     print(f"Transformação SQL: {tempos.transformacao_sql:.3f}s")
@@ -1121,7 +1118,6 @@ def main() -> None:
         )
         finalizar_benchmark(
             monitor,
-            inicio_total,
             tempos,
             args.limite,
             args.rodada,

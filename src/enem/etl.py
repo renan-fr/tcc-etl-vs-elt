@@ -1208,7 +1208,7 @@ def _imprimir_resultado_benchmark(resultado: ResultadoBenchmark) -> None:
 def _finalizar_benchmark(
     benchmark: bool,
     monitor: MonitorRecursos | None,
-    inicio_total: float,
+    tempo_total: float,
     tempo_leitura: float,
     tempo_transformacao: float,
     tempo_carga: float,
@@ -1222,7 +1222,6 @@ def _finalizar_benchmark(
     if not benchmark:
         return
 
-    tempo_total = time.perf_counter() - inicio_total
     recursos = (
         monitor.parar()
         if monitor is not None
@@ -1269,10 +1268,9 @@ def main(
     monitorar_recursos: bool = True,
     modalidade: str = "recursos",
 ) -> None:
-    inicio_total = time.perf_counter()
-    monitor = _iniciar_monitoramento(benchmark, monitorar_recursos)
-
     limpar_relatorio_valores_desconhecidos()
+    monitor = _iniciar_monitoramento(benchmark, monitorar_recursos)
+    inicio_total = time.perf_counter()
 
     inicio = time.perf_counter()
     participantes = extrair_participantes(limite)
@@ -1283,16 +1281,6 @@ def main(
     participantes_tratados = transformar_participantes(participantes)
     resultados_tratados = transformar_resultados(resultados)
     tempo_transformacao = time.perf_counter() - inicio
-
-    print("Participantes:", participantes_tratados.shape)
-    print("Resultados:", resultados_tratados.shape)
-
-    desconhecidos = relatorio_valores_desconhecidos()
-    if desconhecidos.empty:
-        print("Valores desconhecidos: nenhum")
-    else:
-        print("Valores desconhecidos:")
-        print(desconhecidos.to_string(index=False))
 
     tempo_validacao: float | None = None
     if validar:
@@ -1315,9 +1303,6 @@ def main(
             if monitor is not None:
                 monitor.parar()
             raise SystemExit("Carga interrompida por erros críticos de validação.")
-    else:
-        print("Validação interna ignorada no modo de desempenho.")
-
     try:
         conexao_postgres = obter_conexao_postgres(database_url)
     except ValueError as erro:
@@ -1334,6 +1319,19 @@ def main(
         if_exists=if_exists,
     )
     tempo_carga = time.perf_counter() - inicio
+    tempo_total = time.perf_counter() - inicio_total
+
+    print("Participantes:", participantes_tratados.shape)
+    print("Resultados:", resultados_tratados.shape)
+
+    desconhecidos = relatorio_valores_desconhecidos()
+    if desconhecidos.empty:
+        print("Valores desconhecidos: nenhum")
+    else:
+        print("Valores desconhecidos:")
+        print(desconhecidos.to_string(index=False))
+    if not validar:
+        print("Validação interna ignorada no modo de desempenho.")
 
     print(
         "Carga concluída: "
@@ -1343,7 +1341,7 @@ def main(
     _finalizar_benchmark(
         benchmark=benchmark,
         monitor=monitor,
-        inicio_total=inicio_total,
+        tempo_total=tempo_total,
         tempo_leitura=tempo_leitura,
         tempo_transformacao=tempo_transformacao,
         tempo_carga=tempo_carga,

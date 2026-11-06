@@ -781,8 +781,8 @@ def _salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
 
 
 def executar(args: argparse.Namespace) -> None:
-    inicio_total = time.perf_counter()
     monitor = _iniciar_monitoramento(args.benchmark, args.monitorar_recursos)
+    inicio_total = time.perf_counter()
 
     inicio = time.perf_counter()
     fontes = extrair_fontes(args.limite, args.manifesto_chaves)
@@ -805,9 +805,6 @@ def executar(args: argparse.Namespace) -> None:
             if monitor is not None:
                 monitor.parar()
             raise SystemExit("Carga interrompida por erros criticos de validacao.")
-    else:
-        print("Validacao interna ignorada no modo de desempenho.")
-
     try:
         conexao = obter_conexao_postgres(args.database_url)
     except ValueError as erro:
@@ -824,6 +821,9 @@ def executar(args: argparse.Namespace) -> None:
             f"Falha ao conectar ou carregar no PostgreSQL: {erro}"
         ) from erro
     tempo_carga = time.perf_counter() - inicio
+    tempo_total = time.perf_counter() - inicio_total
+    if args.sem_validacao:
+        print("Validacao interna ignorada no modo de desempenho.")
     print(f"Carga concluida: {args.schema}.{TABELA_FINAL}.")
 
     print(f"Munzona: {len(fontes.munzona)} linhas")
@@ -834,7 +834,6 @@ def executar(args: argparse.Namespace) -> None:
     if not args.benchmark:
         return
 
-    tempo_total = time.perf_counter() - inicio_total
     recursos = (
         monitor.parar()
         if monitor is not None

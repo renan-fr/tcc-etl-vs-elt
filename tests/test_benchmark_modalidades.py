@@ -4,6 +4,7 @@ import csv
 from collections import defaultdict
 from dataclasses import fields
 import importlib.util
+import inspect
 import json
 import os
 from pathlib import Path
@@ -589,6 +590,54 @@ class EquivalenciaFluxoTest(unittest.TestCase):
         self.assertEqual(self._fluxo_enem_elt(False), self._fluxo_enem_elt(True))
         self.assertEqual(self._fluxo_tse_etl(False), self._fluxo_tse_etl(True))
         self.assertEqual(self._fluxo_tse_elt(False), self._fluxo_tse_elt(True))
+
+
+class FronteirasTempoTest(unittest.TestCase):
+    def test_enem_elt_reutiliza_o_total_interno_no_csv_e_no_throughput(self) -> None:
+        modulo = PIPELINES[1]
+        tempos = modulo.TemposELT(1.0, 2.0, 3.0, None, 7.5, 3, 2)
+        with tempfile.TemporaryDirectory() as temporario, mock.patch.object(
+            modulo, "salvar_benchmark"
+        ) as salvar:
+            modulo.finalizar_benchmark(
+                None,
+                tempos,
+                1,
+                1,
+                Path(temporario) / "enem_elt.csv",
+                "desempenho",
+            )
+
+        resultado = salvar.call_args.args[0]
+        self.assertEqual(resultado.tempo_total, tempos.total)
+        self.assertEqual(resultado.throughput, 5 / tempos.total)
+
+    def test_totais_dos_etls_sao_capturados_antes_dos_resumos(self) -> None:
+        for modulo, marcador in (
+            (PIPELINES[0], "Carga concluída:"),
+            (PIPELINES[2], "Carga concluida:"),
+        ):
+            with self.subTest(modulo=modulo.__name__):
+                fonte = inspect.getsource(modulo.main if modulo is PIPELINES[0] else modulo.executar)
+                self.assertLess(
+                    fonte.index("tempo_total = time.perf_counter() - inicio_total"),
+                    fonte.index(marcador),
+                )
+
+    def test_tse_elt_mantem_carga_e_commit_antes_do_total(self) -> None:
+        fonte = inspect.getsource(PIPELINES[3].executar)
+        self.assertLess(fonte.index("construir_produto("), fonte.index("tempo_total = time.perf_counter()"))
+        self.assertLess(fonte.index("conexao.commit()"), fonte.index("tempo_total = time.perf_counter()"))
+
+    def test_limpeza_auxiliar_do_enem_etl_precede_o_cronometro(self) -> None:
+        fonte = inspect.getsource(PIPELINES[0].main)
+        self.assertLess(fonte.index("limpar_relatorio_valores_desconhecidos()"), fonte.index("inicio_total = time.perf_counter()"))
+
+    def test_formula_de_throughput_e_protegida_nos_quatro_pipelines(self) -> None:
+        expressao = "if tempo_total else 0.0"
+        for modulo in PIPELINES:
+            with self.subTest(modulo=modulo.__name__):
+                self.assertIn(expressao, inspect.getsource(modulo))
 
 
 class CaminhosEGraficosTest(unittest.TestCase):

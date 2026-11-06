@@ -1079,13 +1079,13 @@ def _salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
 
 
 def executar(args: argparse.Namespace) -> None:
-    inicio_total = time.perf_counter()
     if args.limite is not None and args.manifesto_chaves is None:
         raise SystemExit(
             "O manifesto do volume deve ser preparado antes da execucao."
         )
 
     monitor = _iniciar_monitoramento(args.benchmark, args.monitorar_recursos)
+    inicio_total = time.perf_counter()
 
     inicio_manifesto = time.perf_counter()
     try:
@@ -1147,10 +1147,9 @@ def executar(args: argparse.Namespace) -> None:
             if monitor is not None:
                 monitor.parar()
             raise SystemExit("Pipeline interrompido por erros criticos de validacao.")
-    else:
-        print("Validacao interna ignorada no modo de desempenho.")
-
     tempo_total = time.perf_counter() - inicio_total
+    if args.sem_validacao:
+        print("Validacao interna ignorada no modo de desempenho.")
     print(f"Munzona: {linhas_munzona} linhas")
     print(f"Secao: {linhas_secao} linhas")
     print(f"Candidato: {linhas_candidato} linhas")
