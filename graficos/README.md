@@ -20,7 +20,7 @@ A partir da raiz do projeto:
 python graficos/gerar_graficos.py --run-id oficial_01
 ```
 
-O script lê os quatro arquivos em `data/benchmark/campanhas/<run_id>/`. Os CSVs são separados por `;` e os tempos usam vírgula como separador decimal. Antes de gerar os arquivos, o script valida colunas, volumes, rodadas, duplicidades e a quantidade de observações por cenário, imprimindo no terminal as contagens e médias.
+O script lê somente os quatro arquivos em `data/benchmark/campanhas/<run_id>/desempenho/`. Os CSVs são separados por `;` e os tempos usam vírgula como separador decimal. Antes de gerar os arquivos, o script valida modalidade, ausência de monitoramento, colunas, volumes, rodadas, duplicidades e a quantidade de observações por cenário. Resultados de `recursos` ou arquivos com modalidades misturadas são recusados.
 
 As saídas ficam em `data/benchmark/campanhas/<run_id>/graficos/tempo_processamento/`:
 

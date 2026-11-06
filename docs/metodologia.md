@@ -506,7 +506,9 @@ métrica usado por componente será registrado em cada linha do resultado.
 
 ## 7. Monitoramento de recursos
 
-CPU e RAM serão monitoradas programaticamente utilizando Python e a biblioteca `psutil`.
+CPU e RAM serão monitoradas programaticamente utilizando Python e a biblioteca
+`psutil` somente na modalidade `recursos`. Na modalidade `desempenho`, o monitor
+não será instanciado e nenhuma thread de coleta será iniciada.
 
 Durante cada execução, serão coletadas amostras aproximadamente a cada **0,5 segundo**.
 
@@ -522,13 +524,14 @@ Ao término de cada execução serão calculados valores consolidados como:
 - RAM média;
 - RAM máxima.
 
-O mesmo procedimento de monitoramento será aplicado a todos os cenários.
+O mesmo procedimento de monitoramento será aplicado a todos os cenários da
+modalidade `recursos`. O intervalo permanecerá fixo em 0,5 segundo.
 
 ---
 
 ## 8. Repetições
 
-Cada cenário terá:
+Cada combinação de cenário e modalidade terá:
 
 - **1 execução preliminar de aquecimento**;
 - **5 execuções válidas**.
@@ -565,10 +568,11 @@ válidas.
 A execução de aquecimento utilizará o mesmo subconjunto de dados definido para o
 cenário correspondente, mas não participará das estatísticas finais.
 
-Em cada rodada, todos os cenários previstos serão executados uma vez.
+Em cada rodada, todas as combinações de cenário e modalidade serão executadas
+uma vez.
 
-A ordem das 16 combinações de base, volume e arquitetura será randomizada
-globalmente no aquecimento e em cada rodada. Essa randomização se
+A ordem das 32 unidades formadas por modalidade, base, volume e arquitetura
+será randomizada globalmente no aquecimento e em cada rodada. Essa randomização se
 aplicará somente à ordem das execuções, nunca aos dados pertencentes a cada
 cenário.
 
@@ -623,25 +627,38 @@ necessário evitar ambiguidade, poderá ser usada a forma mais explícita
 
 Os benchmarks principais serão executados na mesma máquina e sob condições semelhantes.
 
-Máquina inicialmente definida:
+Máquina oficial declarada para a campanha:
 
-- processador AMD Ryzen 5 2600;
+- Acer Aspire 16 A16-71M-55H0;
+- processador Intel Core Ultra 5 115U;
 - 16 GB de memória RAM;
-- GPU AMD Radeon RX 5500 XT.
+- armazenamento SSD;
+- Windows 11.
 
-A GPU não terá papel direto no experimento, mas poderá ser registrada como parte da configuração completa da máquina.
+O PostgreSQL e os arquivos CSV da campanha oficial permanecerão na própria
+máquina, sem transferência de rede durante os benchmarks. Essa é uma condição
+declarada do experimento, não uma inferência feita pelo código.
 
 Antes da campanha oficial deverão ser documentados:
 
-- sistema operacional;
-- versão do Python;
-- versão do PostgreSQL;
+- sistema operacional e arquitetura;
+- versão e implementação do Python;
+- versão do PostgreSQL consultada pela conexão da campanha;
 - versões das principais bibliotecas;
-- nome da máquina e processador.
+- nome da máquina e processador;
+- quantidade lógica de CPUs e memória RAM total detectada;
+- parâmetros relevantes do PostgreSQL.
 
-O tipo e modelo do armazenamento deverá ser registrado manualmente junto à
-descrição final da máquina, pois não é identificado de forma portável pelo
-orquestrador.
+O tipo e modelo do armazenamento é uma informação declarada manualmente, pois
+não é identificado de forma portável pelo orquestrador.
+
+O orquestrador grava essas informações no objeto `ambiente` de
+`campanha.json`. O objeto separa `declarado_para_campanha_oficial` de
+`capturado_automaticamente`: a segunda seção descreve o host que executou a
+campanha e pode conter `null` quando uma informação não estiver disponível.
+Versões e características do host são capturadas uma única vez, no início da
+campanha. A consulta ao PostgreSQL usa somente `SELECT version()` e `SHOW`, sem
+alterar parâmetros do servidor e sem gravar credenciais.
 
 Durante os benchmarks serão evitadas aplicações ou tarefas pesadas concorrentes.
 
@@ -720,14 +737,14 @@ serão avaliadas:
 2 × 4 × 2 = 16 combinações principais
 ```
 
-Com cinco execuções válidas por combinação:
+Com duas modalidades e cinco execuções válidas por unidade experimental:
 
 ```text
-16 × 5 = 80 execuções válidas
+16 × 2 × 5 = 160 execuções válidas
 ```
 
-Além disso, serão realizadas 16 execuções de aquecimento que não participarão
-das estatísticas finais, totalizando 96 execuções de pipeline na campanha.
+Além disso, serão realizadas 32 execuções de aquecimento que não participarão
+das estatísticas finais, totalizando 192 execuções de pipeline na campanha.
 
 ---
 
@@ -741,6 +758,9 @@ dataset
 volume_nominal
 arquitetura
 rodada
+modalidade
+monitoramento_ativo
+intervalo_monitoramento_s
 tempo_leitura
 tempo_transformacao
 tempo_carga
@@ -762,7 +782,8 @@ Os metadados comuns serão mantidos em um único arquivo
 commit Git, contagens, horários e estado da campanha. O andamento será atualizado
 nesse mesmo arquivo, sem criar logs individuais por execução.
 
-Cada campanha terá seus quatro CSVs e metadados em um diretório próprio. Se o
+Cada campanha terá quatro CSVs em `desempenho/`, quatro em `recursos/` e os
+metadados em um diretório próprio. Se o
 `run_id` já existir, o orquestrador interromperá a execução para impedir
 sobrescrita. O orquestrador global exigirá uma árvore Git limpa antes de criar
 ou alterar resultados.
@@ -792,6 +813,13 @@ timestamp
 ```
 
 Sempre que possível, CPU e RAM também serão registradas separadamente para Python e PostgreSQL.
+
+Os tempos por etapa, `tempo_total` e throughput da modalidade `desempenho` são
+as métricas oficiais de desempenho; os campos de CPU e RAM dessas linhas ficam
+vazios. CPU e RAM da modalidade `recursos`, coletadas a cada 0,5 segundo, são as
+métricas oficiais de recursos. Os tempos e throughput das execuções monitoradas
+continuam registrados somente para diagnóstico. A proveniência oficial e
+diagnóstica fica declarada em `campanha.json`.
 
 Esses registros serão armazenados de forma estruturada para posterior análise estatística, geração de gráficos e construção dos resultados apresentados no TCC.
 

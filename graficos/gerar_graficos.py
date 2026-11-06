@@ -16,7 +16,11 @@ from src.benchmark_paths import diretorio_campanha, validar_run_id
 BASE_DIR = Path(__file__).resolve().parents[1]
 CORES = {"ETL": "#2ca25f", "ELT": "#2b6cb0"}
 VOLUMES_ESPERADOS = {100_000, 250_000, 500_000, 1_000_000}
-COLUNAS_OBRIGATORIAS = {"run_id", "dataset", "volume_configurado", "arquitetura", "rodada", "tempo_total"}
+COLUNAS_OBRIGATORIAS = {
+    "run_id", "modalidade", "monitoramento_ativo",
+    "intervalo_monitoramento_s", "dataset", "volume_configurado",
+    "arquitetura", "rodada", "tempo_total", "throughput",
+}
 
 
 def converter_tempo(serie: pd.Series, caminho: Path) -> pd.Series:
@@ -29,11 +33,12 @@ def converter_tempo(serie: pd.Series, caminho: Path) -> pd.Series:
 
 
 def carregar_resultados(campanha_dir: Path) -> pd.DataFrame:
+    desempenho_dir = campanha_dir / "desempenho"
     arquivos = {
-        ("ENEM", "ETL"): campanha_dir / "enem_etl.csv",
-        ("ENEM", "ELT"): campanha_dir / "enem_elt.csv",
-        ("TSE", "ETL"): campanha_dir / "tse_etl.csv",
-        ("TSE", "ELT"): campanha_dir / "tse_elt.csv",
+        ("ENEM", "ETL"): desempenho_dir / "enem_etl.csv",
+        ("ENEM", "ELT"): desempenho_dir / "enem_elt.csv",
+        ("TSE", "ETL"): desempenho_dir / "tse_etl.csv",
+        ("TSE", "ELT"): desempenho_dir / "tse_elt.csv",
     }
     partes = []
     for (dataset_esperado, arquitetura_esperada), caminho in arquivos.items():
@@ -43,6 +48,17 @@ def carregar_resultados(campanha_dir: Path) -> pd.DataFrame:
         ausentes = COLUNAS_OBRIGATORIAS - set(df.columns)
         if ausentes:
             raise ValueError(f"{caminho}: colunas obrigatórias ausentes: {sorted(ausentes)}")
+        modalidades = df["modalidade"].astype("string").str.strip().str.lower()
+        if modalidades.ne("desempenho").any():
+            raise ValueError(f"{caminho}: resultados de modalidades diferentes foram misturados.")
+        monitoramento = (
+            df["monitoramento_ativo"].astype("string").str.strip().str.lower()
+        )
+        if not monitoramento.isin(("false", "0")).all():
+            raise ValueError(f"{caminho}: resultado de desempenho com monitoramento ativo.")
+        intervalos = df["intervalo_monitoramento_s"].astype("string").str.strip()
+        if intervalos.fillna("").ne("").any():
+            raise ValueError(f"{caminho}: desempenho não deve ter intervalo de monitoramento.")
         if df["dataset"].astype("string").str.upper().ne(dataset_esperado).any():
             raise ValueError(f"{caminho}: a coluna dataset não corresponde ao arquivo.")
         if df["arquitetura"].astype("string").str.upper().ne(arquitetura_esperada).any():
@@ -57,7 +73,9 @@ def carregar_resultados(campanha_dir: Path) -> pd.DataFrame:
         df["tempo_total_s"] = converter_tempo(df["tempo_total"], caminho)
         partes.append(df)
     resultados = pd.concat(partes, ignore_index=True)
-    if resultados.duplicated(["dataset", "arquitetura", "volume_configurado", "rodada"]).any():
+    if resultados.duplicated(
+        ["modalidade", "dataset", "arquitetura", "volume_configurado", "rodada"]
+    ).any():
         raise ValueError("Há execuções duplicadas para a mesma combinação de cenário e rodada.")
     contagens = resultados.groupby(["dataset", "arquitetura"]).size()
     if not (contagens == 20).all() or len(contagens) != 4:
