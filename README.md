@@ -273,11 +273,15 @@ Com os valores padrão, o comando usa:
 - cinco rodadas válidas (`--rodadas 5`);
 - uma execução de aquecimento por cenário;
 - seed `20241027` (`--seed 20241027`);
-- ENEM e TSE, cada um com ETL e ELT.
+- ENEM e TSE, cada um com ETL e ELT;
+- duas modalidades por cenário: `desempenho`, sem monitor, e `recursos`, com
+  monitoramento a cada 0,5 s.
 
-São 16 combinações de base, volume e arquitetura. Portanto, a configuração
-padrão realiza 16 aquecimentos e 80 medições válidas, totalizando 96 execuções
-de pipeline. O aquecimento não entra nos resultados estatísticos.
+São 16 cenários de base, volume e arquitetura e 32 unidades experimentais ao
+incluir as duas modalidades. Portanto, a configuração padrão realiza 32
+aquecimentos e 160 medições válidas, totalizando 192 execuções de pipeline. Cada
+modalidade e cenário recebe um aquecimento e cinco rodadas válidas; os
+aquecimentos não são gravados nos CSVs.
 
 Exemplo de configuração reduzida:
 
@@ -302,19 +306,27 @@ Cada campanha usa seu próprio diretório:
 ```text
 data/benchmark/campanhas/<run_id>/
 ├── campanha.json
-├── enem_etl.csv
-├── enem_elt.csv
-├── tse_etl.csv
-└── tse_elt.csv
+├── desempenho/
+│   ├── enem_etl.csv
+│   ├── enem_elt.csv
+│   ├── tse_etl.csv
+│   └── tse_elt.csv
+└── recursos/
+    ├── enem_etl.csv
+    ├── enem_elt.csv
+    ├── tse_etl.csv
+    └── tse_elt.csv
 ```
 
 O `campanha.json` registra `run_id`, status, horários de início e fim, commit
 Git, seed, volumes, número de rodadas, combinações, aquecimentos, execuções
 previstas e execuções concluídas.
 
-Os CSVs usam `;` como delimitador. Eles registram o `run_id`, dataset,
-arquitetura, volume, rodada, tempos, contagens e métricas de instrumentação
-produzidas pelo pipeline. As rodadas de aquecimento não são gravadas nos CSVs.
+Os CSVs usam `;` como delimitador e registram `modalidade`,
+`monitoramento_ativo` e `intervalo_monitoramento_s`. Os tempos e o throughput de
+`desempenho` são oficiais; seus campos de CPU/RAM ficam vazios. CPU e RAM de
+`recursos` são oficiais, enquanto seus tempos e throughput são apenas
+diagnósticos. Essa proveniência também fica registrada em `campanha.json`.
 
 Resultados gerados e gráficos são ignorados pelo Git. Os manifestos TSE em
 `data/benchmark/tse/subconjuntos/` permanecem versionados porque fazem parte da
@@ -331,7 +343,8 @@ válidas, execute:
 python graficos\gerar_graficos.py --run-id oficial_01
 ```
 
-O script lê os quatro CSVs da campanha e grava as figuras em:
+O script lê exclusivamente os quatro CSVs de `desempenho/`, rejeita mistura de
+modalidades e grava as figuras em:
 
 ```text
 data/benchmark/campanhas/<run_id>/graficos/tempo_processamento/

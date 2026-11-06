@@ -10,12 +10,18 @@ import sys
 try:
     from src.benchmark_paths import (
         criar_diretorio_campanha,
+        criar_diretorios_modalidades,
         diretorio_campanha,
         validar_run_id,
     )
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from benchmark_paths import criar_diretorio_campanha, diretorio_campanha, validar_run_id
+    from benchmark_paths import (
+        criar_diretorio_campanha,
+        criar_diretorios_modalidades,
+        diretorio_campanha,
+        validar_run_id,
+    )
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -23,6 +29,7 @@ ETL_SCRIPT = BASE_DIR / "src" / "enem" / "etl.py"
 ELT_SCRIPT = BASE_DIR / "src" / "enem" / "elt.py"
 EQUIVALENCIA_SCRIPT = BASE_DIR / "src" / "enem" / "equivalencia.py"
 SEED_PADRAO = 20241027
+MODALIDADES = ("desempenho", "recursos")
 
 
 def executar(comando: list[str], ambiente: dict[str, str] | None = None) -> None:
@@ -81,13 +88,15 @@ def main() -> None:
             campanha_dir = criar_diretorio_campanha(run_id)
         except FileExistsError as erro:
             parser.error(str(erro))
+    criar_diretorios_modalidades(campanha_dir)
     ambiente = os.environ.copy()
     ambiente["BENCHMARK_RUN_ID"] = run_id
     ambiente["BENCHMARK_OUTPUT_DIR"] = str(campanha_dir)
     ambiente["PYTHONIOENCODING"] = "utf-8"
     rng = random.Random(args.seed)
     cenarios = [
-        (volume, arquitetura)
+        (modalidade, volume, arquitetura)
+        for modalidade in MODALIDADES
         for volume in args.volumes
         for arquitetura in ("etl", "elt")
     ]
@@ -100,10 +109,12 @@ def main() -> None:
     for modo, rodada in fases:
         ordem = cenarios.copy()
         rng.shuffle(ordem)
-        for volume, arquitetura in ordem:
+        for modalidade, volume, arquitetura in ordem:
             argumentos = ["--limite", str(volume), "--modo", modo]
             if rodada is not None:
                 argumentos.extend(["--rodada", str(rodada)])
+            if modalidade == "desempenho":
+                argumentos.append("--sem-monitoramento")
             executar(
                 [sys.executable, str(scripts[arquitetura]), *argumentos],
                 ambiente,

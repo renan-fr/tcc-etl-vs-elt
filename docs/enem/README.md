@@ -30,7 +30,8 @@ python src\enem\benchmark.py --certificar --volumes 100000
 
 ## Benchmark
 
-O comando padrão executa um aquecimento e cinco rodadas válidas por volume:
+O comando padrão executa, para cada arquitetura e volume, um aquecimento e
+cinco rodadas válidas em cada modalidade (`desempenho` e `recursos`):
 
 ```powershell
 python src\enem\benchmark.py
@@ -57,6 +58,8 @@ orquestrador e não precisam de configuração manual. O aquecimento não é gra
 somente as rodadas válidas são adicionadas aos CSVs:
 
 ```text
-data/benchmark/campanhas/<run_id>/enem_etl.csv
-data/benchmark/campanhas/<run_id>/enem_elt.csv
+data/benchmark/campanhas/<run_id>/desempenho/enem_etl.csv
+data/benchmark/campanhas/<run_id>/desempenho/enem_elt.csv
+data/benchmark/campanhas/<run_id>/recursos/enem_etl.csv
+data/benchmark/campanhas/<run_id>/recursos/enem_elt.csv
 ```

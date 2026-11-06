@@ -63,7 +63,8 @@ quantidade de votos divergentes.
 
 ## Benchmark
 
-O comando padrão executa um aquecimento e cinco rodadas válidas por volume:
+O comando padrão executa, para cada arquitetura e volume, um aquecimento e
+cinco rodadas válidas em cada modalidade (`desempenho` e `recursos`):
 
 ```powershell
 python src\tse\benchmark.py
@@ -89,6 +90,8 @@ Conexão, schemas, manifestos e arquivos de saída são inferidos pelo projeto. 
 aquecimento não é gravado; somente as rodadas válidas são adicionadas aos CSVs:
 
 ```text
-data/benchmark/campanhas/<run_id>/tse_etl.csv
-data/benchmark/campanhas/<run_id>/tse_elt.csv
+data/benchmark/campanhas/<run_id>/desempenho/tse_etl.csv
+data/benchmark/campanhas/<run_id>/desempenho/tse_elt.csv
+data/benchmark/campanhas/<run_id>/recursos/tse_etl.csv
+data/benchmark/campanhas/<run_id>/recursos/tse_elt.csv
 ```

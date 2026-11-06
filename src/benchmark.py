@@ -10,14 +10,25 @@ import subprocess
 import sys
 
 try:
-    from src.benchmark_paths import criar_diretorio_campanha, validar_run_id
+    from src.benchmark_paths import (
+        criar_diretorio_campanha,
+        criar_diretorios_modalidades,
+        validar_run_id,
+    )
 except ModuleNotFoundError:  # execução direta: python src/benchmark.py
-    from benchmark_paths import criar_diretorio_campanha, validar_run_id
+    from benchmark_paths import (
+        criar_diretorio_campanha,
+        criar_diretorios_modalidades,
+        validar_run_id,
+    )
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 VOLUMES_PADRAO = [100_000, 250_000, 500_000, 1_000_000]
 SEED_PADRAO = 20241027
+MODALIDADES = ("desempenho", "recursos")
+
+
 def agora_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -58,6 +69,7 @@ def validar_git_limpo() -> None:
 
 
 def comando(
+    modalidade: str,
     dataset: str,
     arquitetura: str,
     volume: int,
@@ -74,6 +86,8 @@ def comando(
     ]
     if rodada is not None:
         argumentos.extend(["--rodada", str(rodada)])
+    if modalidade == "desempenho":
+        argumentos.append("--sem-monitoramento")
     return argumentos
 
 
@@ -121,6 +135,7 @@ def main() -> None:
         campanha_dir = criar_diretorio_campanha(run_id)
     except FileExistsError as erro:
         parser.error(str(erro))
+    criar_diretorios_modalidades(campanha_dir)
 
     metadados_caminho = campanha_dir / "campanha.json"
 
@@ -131,7 +146,8 @@ def main() -> None:
     ambiente["PYTHONIOENCODING"] = "utf-8"
     rng = random.Random(args.seed)
     cenarios = [
-        (dataset, volume, arquitetura)
+        (modalidade, dataset, volume, arquitetura)
+        for modalidade in MODALIDADES
         for dataset in ("enem", "tse")
         for volume in args.volumes
         for arquitetura in ("etl", "elt")
@@ -156,6 +172,33 @@ def main() -> None:
         "volumes": args.volumes,
         "rodadas": args.rodadas,
         "combinacoes": len(cenarios),
+        "cenarios_processamento": len(cenarios) // len(MODALIDADES),
+        "modalidades": {
+            "desempenho": {
+                "monitoramento_ativo": False,
+                "intervalo_monitoramento_s": None,
+                "metricas_oficiais": [
+                    "tempo_leitura",
+                    "tempo_transformacao",
+                    "tempo_carga",
+                    "tempo_total",
+                    "throughput",
+                ],
+                "metricas_recursos": None,
+            },
+            "recursos": {
+                "monitoramento_ativo": True,
+                "intervalo_monitoramento_s": 0.5,
+                "metricas_oficiais": ["cpu_*", "ram_*"],
+                "metricas_diagnosticas": [
+                    "tempo_leitura",
+                    "tempo_transformacao",
+                    "tempo_carga",
+                    "tempo_total",
+                    "throughput",
+                ],
+            },
+        },
         "aquecimentos": aquecimentos,
         "medicoes_validas": medicoes_validas,
         "execucoes_previstas": total,
@@ -167,14 +210,14 @@ def main() -> None:
         for modo, rodada in fases:
             ordem = cenarios.copy()
             rng.shuffle(ordem)
-            for dataset, volume, arquitetura in ordem:
+            for modalidade, dataset, volume, arquitetura in ordem:
                 indice += 1
                 print(
                     f"\n=== {indice}/{total} | {modo} | {dataset.upper()} | "
-                    f"{volume} | {arquitetura.upper()} ==="
+                    f"{modalidade.upper()} | {volume} | {arquitetura.upper()} ==="
                 )
                 subprocess.run(
-                    comando(dataset, arquitetura, volume, modo, rodada),
+                    comando(modalidade, dataset, arquitetura, volume, modo, rodada),
                     cwd=BASE_DIR,
                     env=ambiente,
                     check=True,

@@ -14,10 +14,16 @@ from typing import Any
 
 import pandas as pd
 try:
-    from src.benchmark_paths import diretorio_saida_obrigatorio
+    from src.benchmark_paths import (
+        diretorio_modalidade_obrigatorio,
+        validar_execucao_inedita,
+    )
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from benchmark_paths import diretorio_saida_obrigatorio
+    from benchmark_paths import (
+        diretorio_modalidade_obrigatorio,
+        validar_execucao_inedita,
+    )
 import psutil
 import psycopg2
 from psycopg2 import sql
@@ -25,6 +31,12 @@ from dotenv import load_dotenv
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
+CAMPOS_RECURSOS = (
+    "cpu_media_python", "cpu_pico_python", "ram_media_python_mb",
+    "ram_pico_python_mb", "cpu_media_postgres", "cpu_pico_postgres",
+    "ram_media_postgres_mb", "ram_pico_postgres_mb", "cpu_media_total",
+    "cpu_pico_total", "ram_media_total_mb", "ram_pico_total_mb",
+)
 
 from comum import (
     COLUNAS_CHAVE_ORIGEM,
@@ -106,23 +118,26 @@ class ResultadoBenchmark:
     volume_configurado: int | None
     arquitetura: str
     rodada: int | None
+    modalidade: str
+    monitoramento_ativo: bool
+    intervalo_monitoramento_s: float | None
     tempo_leitura: float
     tempo_transformacao: float
     tempo_carga: float
     tempo_total: float
     throughput: float
-    cpu_media_python: float
-    cpu_pico_python: float
-    ram_media_python_mb: float
-    ram_pico_python_mb: float
-    cpu_media_postgres: float
-    cpu_pico_postgres: float
-    ram_media_postgres_mb: float
-    ram_pico_postgres_mb: float
-    cpu_media_total: float
-    cpu_pico_total: float
-    ram_media_total_mb: float
-    ram_pico_total_mb: float
+    cpu_media_python: float | None
+    cpu_pico_python: float | None
+    ram_media_python_mb: float | None
+    ram_pico_python_mb: float | None
+    cpu_media_postgres: float | None
+    cpu_pico_postgres: float | None
+    ram_media_postgres_mb: float | None
+    ram_pico_postgres_mb: float | None
+    cpu_media_total: float | None
+    cpu_pico_total: float | None
+    ram_media_total_mb: float | None
+    ram_pico_total_mb: float | None
     quantidade_registros: int
     linhas_munzona: int
     linhas_secao: int
@@ -734,6 +749,17 @@ class MonitorRecursos:
         }
 
 
+def _iniciar_monitoramento(
+    benchmark: bool,
+    monitorar_recursos: bool,
+) -> MonitorRecursos | None:
+    if not benchmark or not monitorar_recursos:
+        return None
+    monitor = MonitorRecursos(intervalo_segundos=0.5)
+    monitor.iniciar()
+    return monitor
+
+
 def _salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
     caminho.parent.mkdir(parents=True, exist_ok=True)
     existe = caminho.exists() and caminho.stat().st_size > 0
@@ -742,6 +768,7 @@ def _salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
         if isinstance(valor, float):
             valor = round(valor, 3 if campo.startswith("tempo_") else 2)
         linha[campo] = valor
+    validar_execucao_inedita(caminho, linha)
     pd.DataFrame([linha]).to_csv(
         caminho,
         mode="a",
@@ -755,9 +782,7 @@ def _salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
 
 def executar(args: argparse.Namespace) -> None:
     inicio_total = time.perf_counter()
-    monitor = MonitorRecursos()
-    if args.benchmark:
-        monitor.iniciar()
+    monitor = _iniciar_monitoramento(args.benchmark, args.monitorar_recursos)
 
     inicio = time.perf_counter()
     fontes = extrair_fontes(args.limite, args.manifesto_chaves)
@@ -777,7 +802,7 @@ def executar(args: argparse.Namespace) -> None:
         tempo_validacao = time.perf_counter() - inicio
         _imprimir_validacao(validacao)
         if not validacao.valido:
-            if args.benchmark:
+            if monitor is not None:
                 monitor.parar()
             raise SystemExit("Carga interrompida por erros criticos de validacao.")
     else:
@@ -786,14 +811,14 @@ def executar(args: argparse.Namespace) -> None:
     try:
         conexao = obter_conexao_postgres(args.database_url)
     except ValueError as erro:
-        if args.benchmark:
+        if monitor is not None:
             monitor.parar()
         raise SystemExit(str(erro)) from erro
     inicio = time.perf_counter()
     try:
         carregar_produto(produto, conexao, args.schema)
     except (psycopg2.Error, UnicodeError) as erro:
-        if args.benchmark:
+        if monitor is not None:
             monitor.parar()
         raise SystemExit(
             f"Falha ao conectar ou carregar no PostgreSQL: {erro}"
@@ -810,13 +835,20 @@ def executar(args: argparse.Namespace) -> None:
         return
 
     tempo_total = time.perf_counter() - inicio_total
-    recursos = monitor.parar()
+    recursos = (
+        monitor.parar()
+        if monitor is not None
+        else {campo: None for campo in CAMPOS_RECURSOS}
+    )
     quantidade = len(fontes.munzona) + len(fontes.secao) + len(fontes.candidato)
     resultado = ResultadoBenchmark(
         dataset="tse",
         volume_configurado=args.limite,
         arquitetura="etl",
         rodada=args.rodada,
+        modalidade=args.modalidade,
+        monitoramento_ativo=monitor is not None,
+        intervalo_monitoramento_s=0.5 if monitor is not None else None,
         tempo_leitura=tempo_leitura,
         tempo_transformacao=tempo_transformacao,
         tempo_carga=tempo_carga,
@@ -848,6 +880,7 @@ def main() -> None:
         required=True,
     )
     parser.add_argument("--rodada", type=int)
+    parser.add_argument("--sem-monitoramento", action="store_true")
     args = parser.parse_args()
     if args.limite < 1:
         parser.error("--limite deve ser maior que zero.")
@@ -874,8 +907,10 @@ def main() -> None:
     args.schema = os.getenv("POSTGRES_SCHEMA_TSE_ETL_FINAL", "tse_etl_final")
     args.benchmark = args.modo != "certificar"
     args.sem_validacao = args.modo != "certificar"
+    args.monitorar_recursos = not args.sem_monitoramento
+    args.modalidade = "desempenho" if args.sem_monitoramento else "recursos"
     args.benchmark_output = (
-        diretorio_saida_obrigatorio() / "tse_etl.csv"
+        diretorio_modalidade_obrigatorio(args.modalidade) / "tse_etl.csv"
         if args.modo == "medir" else None
     )
     executar(args)

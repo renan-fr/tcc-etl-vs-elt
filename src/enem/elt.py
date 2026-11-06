@@ -14,16 +14,28 @@ from typing import Iterator
 
 import psycopg2
 try:
-    from src.benchmark_paths import diretorio_saida_obrigatorio
+    from src.benchmark_paths import (
+        diretorio_modalidade_obrigatorio,
+        validar_execucao_inedita,
+    )
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from benchmark_paths import diretorio_saida_obrigatorio
+    from benchmark_paths import (
+        diretorio_modalidade_obrigatorio,
+        validar_execucao_inedita,
+    )
 import psutil
 from psycopg2 import sql
 from dotenv import load_dotenv
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
+CAMPOS_RECURSOS = (
+    "cpu_media_python", "cpu_pico_python", "ram_media_python_mb",
+    "ram_pico_python_mb", "cpu_media_postgres", "cpu_pico_postgres",
+    "ram_media_postgres_mb", "ram_pico_postgres_mb", "cpu_media_total",
+    "cpu_pico_total", "ram_media_total_mb", "ram_pico_total_mb",
+)
 PASTA_ENEM = BASE_DIR / "data" / "raw" / "enem" / "microdados_enem_2024" / "DADOS"
 CAMINHO_PARTICIPANTES = PASTA_ENEM / "PARTICIPANTES_2024.csv"
 CAMINHO_RESULTADOS = PASTA_ENEM / "RESULTADOS_2024.csv"
@@ -162,23 +174,26 @@ class ResultadoBenchmark:
     volume_configurado: int | None
     arquitetura: str
     rodada: int | None
+    modalidade: str
+    monitoramento_ativo: bool
+    intervalo_monitoramento_s: float | None
     tempo_leitura: float
     tempo_transformacao: float
     tempo_carga: float
     tempo_total: float
     throughput: float
-    cpu_media_python: float
-    cpu_pico_python: float
-    ram_media_python_mb: float
-    ram_pico_python_mb: float
-    cpu_media_postgres: float
-    cpu_pico_postgres: float
-    ram_media_postgres_mb: float
-    ram_pico_postgres_mb: float
-    cpu_media_total: float
-    cpu_pico_total: float
-    ram_media_total_mb: float
-    ram_pico_total_mb: float
+    cpu_media_python: float | None
+    cpu_pico_python: float | None
+    ram_media_python_mb: float | None
+    ram_pico_python_mb: float | None
+    cpu_media_postgres: float | None
+    cpu_pico_postgres: float | None
+    ram_media_postgres_mb: float | None
+    ram_pico_postgres_mb: float | None
+    cpu_media_total: float | None
+    cpu_pico_total: float | None
+    ram_media_total_mb: float | None
+    ram_pico_total_mb: float | None
     quantidade_registros: int
     linhas_participantes: int
     linhas_resultados: int
@@ -259,6 +274,17 @@ class MonitorRecursos:
             "cpu_total": cpu_python + cpu_postgres,
             "ram_total": float(ram_python + ram_postgres),
         })
+
+
+def _iniciar_monitoramento(
+    benchmark: bool,
+    monitorar_recursos: bool,
+) -> MonitorRecursos | None:
+    if not benchmark or not monitorar_recursos:
+        return None
+    monitor = MonitorRecursos(intervalo_segundos=0.5)
+    monitor.iniciar()
+    return monitor
 
 
 def _cpu(processo: psutil.Process) -> float:
@@ -1003,6 +1029,7 @@ def salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
             casas = 3 if campo.startswith("tempo_") else 2
             valor = str(round(valor, casas)).replace(".", ",")
         linha[campo] = valor
+    validar_execucao_inedita(caminho, linha)
     with caminho.open("a", newline="", encoding="utf-8") as arquivo:
         escritor = csv.DictWriter(arquivo, fieldnames=campos, delimiter=";")
         if not existe:
@@ -1011,19 +1038,27 @@ def salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
 
 
 def finalizar_benchmark(
-    monitor,
+    monitor: MonitorRecursos | None,
     inicio_total,
     tempos,
     limite,
     rodada,
     caminho_csv: Path | None,
+    modalidade: str,
 ) -> None:
     tempo_total = time.perf_counter() - inicio_total
-    recursos = monitor.parar()
+    recursos = (
+        monitor.parar()
+        if monitor is not None
+        else {campo: None for campo in CAMPOS_RECURSOS}
+    )
     quantidade = tempos.linhas_participantes + tempos.linhas_resultados
     resultado = ResultadoBenchmark(
         dataset="enem", volume_configurado=limite, arquitetura="elt",
-        rodada=rodada, tempo_leitura=tempos.leitura,
+        rodada=rodada, modalidade=modalidade,
+        monitoramento_ativo=monitor is not None,
+        intervalo_monitoramento_s=0.5 if monitor is not None else None,
+        tempo_leitura=tempos.leitura,
         tempo_transformacao=tempos.transformacao_sql,
         tempo_carga=tempos.carga_raw, tempo_total=tempo_total,
         throughput=quantidade / tempo_total if tempo_total else 0.0,
@@ -1046,6 +1081,7 @@ def main() -> None:
         required=True,
     )
     parser.add_argument("--rodada", type=int)
+    parser.add_argument("--sem-monitoramento", action="store_true")
     args = parser.parse_args()
     if args.limite < 1:
         parser.error("--limite deve ser maior que zero.")
@@ -1055,10 +1091,9 @@ def main() -> None:
         parser.error("--rodada só pode ser usada no modo medir.")
 
     benchmark = args.modo != "certificar"
+    modalidade = "desempenho" if args.sem_monitoramento else "recursos"
     inicio_total = time.perf_counter()
-    monitor = MonitorRecursos()
-    if benchmark:
-        monitor.iniciar()
+    monitor = _iniciar_monitoramento(benchmark, not args.sem_monitoramento)
     try:
         tempos = executar_elt(
             os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL"),
@@ -1068,7 +1103,7 @@ def main() -> None:
             validar=args.modo == "certificar",
         )
     except (psycopg2.Error, UnicodeError, ValueError) as erro:
-        if benchmark:
+        if monitor is not None:
             monitor.parar()
         raise SystemExit(f"Falha no pipeline ELT do ENEM: {erro}") from erro
     print(f"Leitura/preparacao: {tempos.leitura:.3f}s")
@@ -1081,7 +1116,7 @@ def main() -> None:
     print(f"Total: {tempos.total:.3f}s")
     if benchmark:
         caminho_csv = (
-            diretorio_saida_obrigatorio() / "enem_elt.csv"
+            diretorio_modalidade_obrigatorio(modalidade) / "enem_elt.csv"
             if args.modo == "medir" else None
         )
         finalizar_benchmark(
@@ -1091,6 +1126,7 @@ def main() -> None:
             args.limite,
             args.rodada,
             caminho_csv,
+            modalidade,
         )
 
 
