@@ -1,0 +1,49 @@
+{
+  "run_id": "diagnostico_coletas_aquecido_20261105",
+  "tipo": "diagnostico_duracao_coletas",
+  "status": "concluido",
+  "inicio": "2026-11-05T19:49:05-03:00",
+  "fim": "2026-11-05T19:49:36-03:00",
+  "volume": 100000,
+  "intervalo_segundos": 0.1,
+  "aquecimento_separado": true,
+  "execucoes_medidas_previstas": 4,
+  "execucoes_medidas_concluidas": 4,
+  "python": "3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]",
+  "plataforma": "Windows-10-10.0.26200-SP0",
+  "commit_git": "09dda2dc16541186fc99d729a48374ccbcf8ca25",
+  "arquivos": [
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "resultado_bruto": "brutos\\enem_etl_v100000_monitor_0_1s.csv",
+      "diagnostico": "diagnosticos\\enem_etl_v100000_monitor_0_1s.csv",
+      "numero_amostras": 17,
+      "tempo_total": "3,091"
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "resultado_bruto": "brutos\\enem_elt_v100000_monitor_0_1s.csv",
+      "diagnostico": "diagnosticos\\enem_elt_v100000_monitor_0_1s.csv",
+      "numero_amostras": 15,
+      "tempo_total": "2,578"
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "resultado_bruto": "brutos\\tse_etl_v100000_monitor_0_1s.csv",
+      "diagnostico": "diagnosticos\\tse_etl_v100000_monitor_0_1s.csv",
+      "numero_amostras": 13,
+      "tempo_total": "2,168"
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "resultado_bruto": "brutos\\tse_elt_v100000_monitor_0_1s.csv",
+      "diagnostico": "diagnosticos\\tse_elt_v100000_monitor_0_1s.csv",
+      "numero_amostras": 32,
+      "tempo_total": "5,38"
+    }
+  ]
+}

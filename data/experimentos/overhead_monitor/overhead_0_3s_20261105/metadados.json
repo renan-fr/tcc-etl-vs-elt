@@ -1,0 +1,842 @@
+{
+  "run_id": "overhead_0_3s_20261105",
+  "status": "concluido",
+  "inicio": "2026-11-05T19:58:10-03:00",
+  "fim": "2026-11-05T20:01:28-03:00",
+  "volumes": [
+    100000
+  ],
+  "rodadas": 5,
+  "seed": 20261105,
+  "condicoes": [
+    {
+      "nome": "desligado",
+      "intervalo_segundos": null
+    },
+    {
+      "nome": "monitor_0_5s",
+      "intervalo_segundos": 0.5
+    },
+    {
+      "nome": "monitor_0_3s",
+      "intervalo_segundos": 0.3
+    }
+  ],
+  "datasets": [
+    "enem",
+    "tse"
+  ],
+  "arquiteturas": [
+    "etl",
+    "elt"
+  ],
+  "aquecimentos": 12,
+  "medicoes_validas": 60,
+  "execucoes_previstas": 72,
+  "execucoes_concluidas": 72,
+  "python": "3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]",
+  "plataforma": "Windows-10-10.0.26200-SP0",
+  "commit_git": "09dda2dc16541186fc99d729a48374ccbcf8ca25",
+  "manifestos_tse": [
+    {
+      "volume": 100000,
+      "caminho": "C:\\Users\\ferre\\Documents\\tcc-etl-vs-elt\\data\\benchmark\\tse\\subconjuntos\\chaves_100000.csv",
+      "sha256": "a96b6eca3c8362aa0c3d06e9d1e4e8d85eb425ef70eda06d971f91a7fed9cb42"
+    }
+  ],
+  "controle_dados": "Dentro de cada volume, as tres condicoes usam o mesmo entrypoint, dados e manifesto; variam apenas monitoramento e intervalo.",
+  "plano": [
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem_condicao": 1,
+      "ordem": 1
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem_condicao": 2,
+      "ordem": 2
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem_condicao": 3,
+      "ordem": 3
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem_condicao": 1,
+      "ordem": 4
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem_condicao": 2,
+      "ordem": 5
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem_condicao": 3,
+      "ordem": 6
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem_condicao": 1,
+      "ordem": 7
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem_condicao": 2,
+      "ordem": 8
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem_condicao": 3,
+      "ordem": 9
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem_condicao": 1,
+      "ordem": 10
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem_condicao": 2,
+      "ordem": 11
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem_condicao": 3,
+      "ordem": 12
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 1,
+      "ordem_condicao": 1,
+      "ordem": 13
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 1,
+      "ordem_condicao": 2,
+      "ordem": 14
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 1,
+      "ordem_condicao": 3,
+      "ordem": 15
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 1,
+      "ordem_condicao": 1,
+      "ordem": 16
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 1,
+      "ordem_condicao": 2,
+      "ordem": 17
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 1,
+      "ordem_condicao": 3,
+      "ordem": 18
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 1,
+      "ordem_condicao": 1,
+      "ordem": 19
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 1,
+      "ordem_condicao": 2,
+      "ordem": 20
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 1,
+      "ordem_condicao": 3,
+      "ordem": 21
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 1,
+      "ordem_condicao": 1,
+      "ordem": 22
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 1,
+      "ordem_condicao": 2,
+      "ordem": 23
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 1,
+      "ordem_condicao": 3,
+      "ordem": 24
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 2,
+      "ordem_condicao": 1,
+      "ordem": 25
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 2,
+      "ordem_condicao": 2,
+      "ordem": 26
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 2,
+      "ordem_condicao": 3,
+      "ordem": 27
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 2,
+      "ordem_condicao": 1,
+      "ordem": 28
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 2,
+      "ordem_condicao": 2,
+      "ordem": 29
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 2,
+      "ordem_condicao": 3,
+      "ordem": 30
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 2,
+      "ordem_condicao": 1,
+      "ordem": 31
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 2,
+      "ordem_condicao": 2,
+      "ordem": 32
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 2,
+      "ordem_condicao": 3,
+      "ordem": 33
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 2,
+      "ordem_condicao": 1,
+      "ordem": 34
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 2,
+      "ordem_condicao": 2,
+      "ordem": 35
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 2,
+      "ordem_condicao": 3,
+      "ordem": 36
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 3,
+      "ordem_condicao": 1,
+      "ordem": 37
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 3,
+      "ordem_condicao": 2,
+      "ordem": 38
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 3,
+      "ordem_condicao": 3,
+      "ordem": 39
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 3,
+      "ordem_condicao": 1,
+      "ordem": 40
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 3,
+      "ordem_condicao": 2,
+      "ordem": 41
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 3,
+      "ordem_condicao": 3,
+      "ordem": 42
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 3,
+      "ordem_condicao": 1,
+      "ordem": 43
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 3,
+      "ordem_condicao": 2,
+      "ordem": 44
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 3,
+      "ordem_condicao": 3,
+      "ordem": 45
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 3,
+      "ordem_condicao": 1,
+      "ordem": 46
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 3,
+      "ordem_condicao": 2,
+      "ordem": 47
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 3,
+      "ordem_condicao": 3,
+      "ordem": 48
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 4,
+      "ordem_condicao": 1,
+      "ordem": 49
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 4,
+      "ordem_condicao": 2,
+      "ordem": 50
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 4,
+      "ordem_condicao": 3,
+      "ordem": 51
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 4,
+      "ordem_condicao": 1,
+      "ordem": 52
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 4,
+      "ordem_condicao": 2,
+      "ordem": 53
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 4,
+      "ordem_condicao": 3,
+      "ordem": 54
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 4,
+      "ordem_condicao": 1,
+      "ordem": 55
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 4,
+      "ordem_condicao": 2,
+      "ordem": 56
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 4,
+      "ordem_condicao": 3,
+      "ordem": 57
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 4,
+      "ordem_condicao": 1,
+      "ordem": 58
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 4,
+      "ordem_condicao": 2,
+      "ordem": 59
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 4,
+      "ordem_condicao": 3,
+      "ordem": 60
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 5,
+      "ordem_condicao": 1,
+      "ordem": 61
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 5,
+      "ordem_condicao": 2,
+      "ordem": 62
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 5,
+      "ordem_condicao": 3,
+      "ordem": 63
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 5,
+      "ordem_condicao": 1,
+      "ordem": 64
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 5,
+      "ordem_condicao": 2,
+      "ordem": 65
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 5,
+      "ordem_condicao": 3,
+      "ordem": 66
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 5,
+      "ordem_condicao": 1,
+      "ordem": 67
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 5,
+      "ordem_condicao": 2,
+      "ordem": 68
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 5,
+      "ordem_condicao": 3,
+      "ordem": 69
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_5s",
+      "intervalo_segundos": 0.5,
+      "modo": "medir",
+      "rodada": 5,
+      "ordem_condicao": 1,
+      "ordem": 70
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "intervalo_segundos": null,
+      "modo": "medir",
+      "rodada": 5,
+      "ordem_condicao": 2,
+      "ordem": 71
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "monitor_0_3s",
+      "intervalo_segundos": 0.3,
+      "modo": "medir",
+      "rodada": 5,
+      "ordem_condicao": 3,
+      "ordem": 72
+    }
+  ]
+}

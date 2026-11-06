@@ -1,0 +1,323 @@
+{
+  "run_id": "piloto_overhead_01",
+  "status": "concluido",
+  "inicio": "2026-11-05T16:40:13-03:00",
+  "fim": "2026-11-05T16:41:56-03:00",
+  "volume": 100000,
+  "rodadas": 3,
+  "seed": 20261105,
+  "condicoes": [
+    "ligado",
+    "desligado"
+  ],
+  "datasets": [
+    "enem",
+    "tse"
+  ],
+  "arquiteturas": [
+    "etl",
+    "elt"
+  ],
+  "aquecimentos": 8,
+  "medicoes_validas": 24,
+  "execucoes_previstas": 32,
+  "execucoes_concluidas": 32,
+  "python": "3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]",
+  "plataforma": "Windows-10-10.0.26200-SP0",
+  "commit_git": "09dda2dc16541186fc99d729a48374ccbcf8ca25",
+  "manifesto_tse": {
+    "caminho": "C:\\Users\\ferre\\Documents\\tcc-etl-vs-elt\\data\\benchmark\\tse\\subconjuntos\\chaves_100000.csv",
+    "sha256": "a96b6eca3c8362aa0c3d06e9d1e4e8d85eb425ef70eda06d971f91a7fed9cb42"
+  },
+  "controle_dados": "Mesmo volume, entrypoint e manifesto por par; somente --sem-monitoramento varia.",
+  "plano": [
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem": 1
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "ligado",
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem": 2
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "ligado",
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem": 3
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem": 4
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem": 5
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "ligado",
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem": 6
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "ligado",
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem": 7
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "modo": "aquecimento",
+      "rodada": null,
+      "ordem": 8
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "ligado",
+      "modo": "medir",
+      "rodada": 1,
+      "ordem": 9
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "modo": "medir",
+      "rodada": 1,
+      "ordem": 10
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "modo": "medir",
+      "rodada": 1,
+      "ordem": 11
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "ligado",
+      "modo": "medir",
+      "rodada": 1,
+      "ordem": 12
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "modo": "medir",
+      "rodada": 1,
+      "ordem": 13
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "ligado",
+      "modo": "medir",
+      "rodada": 1,
+      "ordem": 14
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "modo": "medir",
+      "rodada": 1,
+      "ordem": 15
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "ligado",
+      "modo": "medir",
+      "rodada": 1,
+      "ordem": 16
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "modo": "medir",
+      "rodada": 2,
+      "ordem": 17
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "ligado",
+      "modo": "medir",
+      "rodada": 2,
+      "ordem": 18
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "ligado",
+      "modo": "medir",
+      "rodada": 2,
+      "ordem": 19
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "modo": "medir",
+      "rodada": 2,
+      "ordem": 20
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "modo": "medir",
+      "rodada": 2,
+      "ordem": 21
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "ligado",
+      "modo": "medir",
+      "rodada": 2,
+      "ordem": 22
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "ligado",
+      "modo": "medir",
+      "rodada": 2,
+      "ordem": 23
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "modo": "medir",
+      "rodada": 2,
+      "ordem": 24
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "ligado",
+      "modo": "medir",
+      "rodada": 3,
+      "ordem": 25
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "modo": "medir",
+      "rodada": 3,
+      "ordem": 26
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "desligado",
+      "modo": "medir",
+      "rodada": 3,
+      "ordem": 27
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "etl",
+      "volume": 100000,
+      "condicao": "ligado",
+      "modo": "medir",
+      "rodada": 3,
+      "ordem": 28
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "ligado",
+      "modo": "medir",
+      "rodada": 3,
+      "ordem": 29
+    },
+    {
+      "dataset": "tse",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "modo": "medir",
+      "rodada": 3,
+      "ordem": 30
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "ligado",
+      "modo": "medir",
+      "rodada": 3,
+      "ordem": 31
+    },
+    {
+      "dataset": "enem",
+      "arquitetura": "elt",
+      "volume": 100000,
+      "condicao": "desligado",
+      "modo": "medir",
+      "rodada": 3,
+      "ordem": 32
+    }
+  ]
+}

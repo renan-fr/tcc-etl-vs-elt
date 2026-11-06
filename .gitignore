@@ -8,8 +8,11 @@ results/*.csv
 results/graficos/*
 !results/graficos/.gitkeep
 
-# Resultados dos experimentos de overhead
-data/experimentos/overhead_monitor/
+# Artefatos volumosos dos experimentos de overhead.
+# metadados.json e resultados.csv permanecem versionaveis.
+data/experimentos/overhead_monitor/**/amostras/
+data/experimentos/overhead_monitor/**/brutos/
+data/experimentos/overhead_monitor/**/diagnosticos/
 
 # Ambiente Python
 .venv/
