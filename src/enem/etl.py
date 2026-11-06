@@ -1177,6 +1177,11 @@ def _linhas_resumo_benchmark(resultado: ResultadoBenchmark) -> list[str]:
     volume = resultado.volume_configurado
     volume_formatado = "todos" if volume is None else str(volume)
 
+    def recurso_formatado(valor: float | None, unidade: str) -> str:
+        if valor is None:
+            return "não monitorado"
+        return f"{valor:.2f}{unidade}"
+
     return [
         "Benchmark ETL ENEM:",
         f"Volume configurado: {volume_formatado}",
@@ -1188,10 +1193,10 @@ def _linhas_resumo_benchmark(resultado: ResultadoBenchmark) -> list[str]:
         f"Tempo carga: {resultado.tempo_carga:.3f}s",
         f"Tempo total: {resultado.tempo_total:.3f}s",
         f"Throughput: {resultado.throughput:.2f} registros/s",
-        f"CPU media total: {resultado.cpu_media_total:.2f}%",
-        f"CPU pico total: {resultado.cpu_pico_total:.2f}%",
-        f"RAM media total: {resultado.ram_media_total_mb:.2f} MB",
-        f"RAM pico total: {resultado.ram_pico_total_mb:.2f} MB",
+        f"CPU media total: {recurso_formatado(resultado.cpu_media_total, '%')}",
+        f"CPU pico total: {recurso_formatado(resultado.cpu_pico_total, '%')}",
+        f"RAM media total: {recurso_formatado(resultado.ram_media_total_mb, ' MB')}",
+        f"RAM pico total: {recurso_formatado(resultado.ram_pico_total_mb, ' MB')}",
     ]
 
 

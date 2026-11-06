@@ -210,6 +210,29 @@ class MatrizEOrquestradorTest(unittest.TestCase):
 
 
 class MonitorESerializacaoTest(unittest.TestCase):
+    def test_resumo_enem_etl_preserva_numeros_e_indica_recurso_ausente(self) -> None:
+        modulo = PIPELINES[0]
+        resultado = resultado_sem_recursos(modulo)
+
+        linhas = modulo._linhas_resumo_benchmark(resultado)
+
+        self.assertIn("CPU media total: não monitorado", linhas)
+        self.assertIn("CPU pico total: não monitorado", linhas)
+        self.assertIn("RAM media total: não monitorado", linhas)
+        self.assertIn("RAM pico total: não monitorado", linhas)
+        self.assertNotIn("0.00", "\n".join(linhas))
+
+        valores = {campo: 12.345 for campo in modulo.CAMPOS_RECURSOS}
+        monitorado = modulo.ResultadoBenchmark(
+            **{
+                campo.name: valores.get(campo.name, getattr(resultado, campo.name))
+                for campo in fields(modulo.ResultadoBenchmark)
+            }
+        )
+        linhas_monitorado = modulo._linhas_resumo_benchmark(monitorado)
+        self.assertIn("CPU media total: 12.35%", linhas_monitorado)
+        self.assertIn("RAM media total: 12.35 MB", linhas_monitorado)
+
     def test_desempenho_nao_instancia_monitor_e_recursos_usa_meio_segundo(self) -> None:
         for modulo in PIPELINES:
             with self.subTest(modulo=modulo.__name__), mock.patch.object(
@@ -287,7 +310,7 @@ class EquivalenciaFluxoTest(unittest.TestCase):
         ), mock.patch.object(
             modulo, "carregar_enem",
             side_effect=lambda *_args, **_kwargs: eventos.append("carregar_enem"),
-        ), mock.patch.object(modulo, "_finalizar_benchmark"):
+        ):
             modulo.main(
                 1, None, "schema", "replace", benchmark=True,
                 benchmark_output=None, rodada=1, validar=False,
@@ -307,7 +330,7 @@ class EquivalenciaFluxoTest(unittest.TestCase):
             return_value=self._monitor(modulo) if monitorar else None,
         ), mock.patch.object(
             modulo, "executar_elt", return_value=tempos
-        ) as executar, mock.patch.object(modulo, "finalizar_benchmark"):
+        ) as executar:
             modulo.main()
         return executar.call_args
 
@@ -411,12 +434,12 @@ class CaminhosEGraficosTest(unittest.TestCase):
                 os.environ, {"BENCHMARK_OUTPUT_DIR": str(campanha)}
             ):
                 self.assertEqual(
-                    benchmark_paths.diretorio_modalidade_obrigatorio("desempenho"),
-                    campanha / "desempenho",
+                    benchmark_paths.diretorio_modalidade_obrigatorio("desempenho").resolve(),
+                    (campanha / "desempenho").resolve(),
                 )
                 self.assertEqual(
-                    benchmark_paths.diretorio_modalidade_obrigatorio("recursos"),
-                    campanha / "recursos",
+                    benchmark_paths.diretorio_modalidade_obrigatorio("recursos").resolve(),
+                    (campanha / "recursos").resolve(),
                 )
                 with self.assertRaises(ValueError):
                     benchmark_paths.diretorio_modalidade_obrigatorio("mista")
