@@ -20,6 +20,9 @@ results/*.csv
 results/graficos/*
 !results/graficos/.gitkeep
 
+# Artefatos locais de experimentos
+data/experimentos/
+
 # Ambiente Python
 .venv/
 venv/
