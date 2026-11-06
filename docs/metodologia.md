@@ -627,25 +627,38 @@ necessário evitar ambiguidade, poderá ser usada a forma mais explícita
 
 Os benchmarks principais serão executados na mesma máquina e sob condições semelhantes.
 
-Máquina inicialmente definida:
+Máquina oficial declarada para a campanha:
 
-- processador AMD Ryzen 5 2600;
+- Acer Aspire 16 A16-71M-55H0;
+- processador Intel Core Ultra 5 115U;
 - 16 GB de memória RAM;
-- GPU AMD Radeon RX 5500 XT.
+- armazenamento SSD;
+- Windows 11.
 
-A GPU não terá papel direto no experimento, mas poderá ser registrada como parte da configuração completa da máquina.
+O PostgreSQL e os arquivos CSV da campanha oficial permanecerão na própria
+máquina, sem transferência de rede durante os benchmarks. Essa é uma condição
+declarada do experimento, não uma inferência feita pelo código.
 
 Antes da campanha oficial deverão ser documentados:
 
-- sistema operacional;
-- versão do Python;
-- versão do PostgreSQL;
+- sistema operacional e arquitetura;
+- versão e implementação do Python;
+- versão do PostgreSQL consultada pela conexão da campanha;
 - versões das principais bibliotecas;
-- nome da máquina e processador.
+- nome da máquina e processador;
+- quantidade lógica de CPUs e memória RAM total detectada;
+- parâmetros relevantes do PostgreSQL.
 
-O tipo e modelo do armazenamento deverá ser registrado manualmente junto à
-descrição final da máquina, pois não é identificado de forma portável pelo
-orquestrador.
+O tipo e modelo do armazenamento é uma informação declarada manualmente, pois
+não é identificado de forma portável pelo orquestrador.
+
+O orquestrador grava essas informações no objeto `ambiente` de
+`campanha.json`. O objeto separa `declarado_para_campanha_oficial` de
+`capturado_automaticamente`: a segunda seção descreve o host que executou a
+campanha e pode conter `null` quando uma informação não estiver disponível.
+Versões e características do host são capturadas uma única vez, no início da
+campanha. A consulta ao PostgreSQL usa somente `SELECT version()` e `SHOW`, sem
+alterar parâmetros do servidor e sem gravar credenciais.
 
 Durante os benchmarks serão evitadas aplicações ou tarefas pesadas concorrentes.
 

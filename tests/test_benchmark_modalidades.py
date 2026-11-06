@@ -132,6 +132,8 @@ class MatrizEOrquestradorTest(unittest.TestCase):
         self.assertEqual(metadados["execucoes_previstas"], 16)
         self.assertEqual(metadados["execucoes_concluidas"], 16)
         self.assertEqual(metadados["status"], "concluida")
+        self.assertIn("ambiente", metadados)
+        self.assertIn("capturado_automaticamente", metadados["ambiente"])
         self.assertEqual(
             metadados["modalidades"]["recursos"]["intervalo_monitoramento_s"],
             0.5,
@@ -188,6 +190,176 @@ class MatrizEOrquestradorTest(unittest.TestCase):
         self.assertEqual(metadados["aquecimentos"], 32)
         self.assertEqual(metadados["medicoes_validas"], 160)
         self.assertEqual(metadados["execucoes_previstas"], 192)
+
+
+class AmbienteCampanhaTest(unittest.TestCase):
+    def _executar_com_erro_controlado(
+        self,
+        erro: BaseException,
+        ambiente=None,
+    ) -> dict[str, object]:
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = Path(temporario) / "campanha"
+            campanha.mkdir()
+            argumentos = [
+                "benchmark.py", "--run-id", "erro_controlado",
+                "--volumes", "100000", "--rodadas", "1",
+            ]
+            with mock.patch.object(sys, "argv", argumentos), mock.patch.object(
+                benchmark, "validar_git_limpo"
+            ), mock.patch.object(
+                benchmark, "criar_diretorio_campanha", return_value=campanha
+            ), mock.patch.object(
+                benchmark, "obter_commit_git", return_value="abc123"
+            ), mock.patch.object(
+                benchmark.subprocess, "run", side_effect=erro
+            ), mock.patch.object(
+                benchmark, "coletar_ambiente",
+                return_value=ambiente if ambiente is not None else {
+                    "status": "capturado_no_host_da_campanha",
+                    "declarado_para_campanha_oficial": {},
+                    "capturado_automaticamente": {},
+                },
+            ):
+                with self.assertRaises(type(erro)):
+                    benchmark.main()
+            return json.loads(
+                (campanha / "campanha.json").read_text(encoding="utf-8")
+            )
+
+    def test_falha_inesperada_na_coleta_nao_interrompe_campanha(self) -> None:
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = Path(temporario) / "campanha"
+            campanha.mkdir()
+            comandos: list[list[str]] = []
+            argumentos = [
+                "benchmark.py", "--run-id", "coleta_falha",
+                "--volumes", "100000", "--rodadas", "1",
+            ]
+            with mock.patch.object(sys, "argv", argumentos), mock.patch.object(
+                benchmark, "validar_git_limpo"
+            ), mock.patch.object(
+                benchmark, "criar_diretorio_campanha", return_value=campanha
+            ), mock.patch.object(
+                benchmark, "obter_commit_git", return_value="abc123"
+            ), mock.patch.object(
+                benchmark, "coletar_ambiente",
+                side_effect=RuntimeError(
+                    "falha interna password=nao-gravar "
+                    "postgresql://usuario:nao-gravar@localhost/tcc"
+                ),
+            ), mock.patch.object(
+                benchmark.subprocess, "run",
+                side_effect=lambda comando, **_: comandos.append(list(comando)),
+            ):
+                benchmark.main()
+            metadados = json.loads(
+                (campanha / "campanha.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(len(comandos), 16)
+        self.assertEqual(metadados["status"], "concluida")
+        self.assertEqual(metadados["ambiente"]["status"], "falha_na_coleta")
+        self.assertEqual(
+            metadados["ambiente"]["erro"],
+            {"tipo": "RuntimeError", "contexto": "coleta_ambiente"},
+        )
+        self.assertIsNone(metadados["ambiente"]["capturado_automaticamente"])
+        self.assertNotIn("nao-gravar", json.dumps(metadados))
+
+    def test_erro_persistido_redige_senha_e_url_postgresql(self) -> None:
+        erro = RuntimeError(
+            "password=senha-ficticia "
+            "postgresql://usuario:senha-url@localhost:5432/tcc"
+        )
+        metadados = self._executar_com_erro_controlado(erro)
+
+        self.assertEqual(metadados["status"], "falhou")
+        registro_erro = metadados["erro"]
+        self.assertEqual(registro_erro["tipo"], "RuntimeError")
+        self.assertEqual(registro_erro["contexto"], "execucao_pipeline")
+        self.assertNotIn("senha-ficticia", json.dumps(metadados))
+        self.assertNotIn("senha-url", json.dumps(metadados))
+        self.assertNotIn("postgresql://", registro_erro["mensagem"])
+
+    def test_coleta_ambiente_preserva_origem_e_nao_expoe_credenciais(self) -> None:
+        with mock.patch.object(
+            benchmark,
+            "_configuracao_postgres",
+            return_value=(None, {}, {"host": "localhost", "porta": 5432, "banco": "tcc"}),
+        ), mock.patch.object(
+            benchmark,
+            "_consultar_postgres_ambiente",
+            return_value={
+                "versao_servidor": "PostgreSQL observado",
+                "configuracoes": {"work_mem": "4MB"},
+                "status": "consultado",
+                "origem": "teste",
+            },
+        ), mock.patch.object(
+            benchmark,
+            "_versoes_dependencias",
+            return_value={"pandas": "observado", "psutil": "observado"},
+        ):
+            ambiente = benchmark.coletar_ambiente()
+
+        self.assertEqual(
+            ambiente["status"], "capturado_no_host_da_campanha"
+        )
+        self.assertEqual(
+            ambiente["declarado_para_campanha_oficial"]["sistema_operacional"],
+            "Windows 11",
+        )
+        capturado = ambiente["capturado_automaticamente"]
+        self.assertIn("sistema_operacional", capturado)
+        self.assertIn("python", capturado)
+        self.assertIn("dependencias", capturado)
+        self.assertIn("postgresql", capturado)
+        self.assertIn("hardware", capturado)
+        texto = json.dumps(ambiente)
+        self.assertNotIn("password", texto.lower())
+        self.assertNotIn("database_url", texto.lower())
+        self.assertNotIn("senha", texto.lower())
+
+    def test_consulta_postgres_usa_somente_select_e_show_e_fecha_recursos(self) -> None:
+        cursor = mock.MagicMock()
+        cursor.fetchone.side_effect = [
+            ("PostgreSQL 18 observado",),
+            *[(f"valor_{parametro}",) for parametro in benchmark.PARAMETROS_POSTGRES],
+        ]
+        conexao = mock.MagicMock()
+        conexao.cursor.return_value = cursor
+        with mock.patch.object(benchmark.psycopg2, "connect", return_value=conexao):
+            resultado = benchmark._consultar_postgres_ambiente(
+                None,
+                {
+                    "dbname": "tcc",
+                    "user": "usuario",
+                    "password": "segredo",
+                },
+            )
+
+        self.assertEqual(resultado["status"], "consultado")
+        self.assertEqual(resultado["versao_servidor"], "PostgreSQL 18 observado")
+        self.assertEqual(cursor.execute.call_count, 1 + len(benchmark.PARAMETROS_POSTGRES))
+        self.assertTrue(all(
+            chamada.args[0].startswith(("SELECT version()", "SHOW "))
+            for chamada in cursor.execute.call_args_list
+        ))
+        cursor.close.assert_called_once_with()
+        conexao.close.assert_called_once_with()
+
+    def test_consulta_postgres_indisponivel_nao_inventa_valores(self) -> None:
+        resultado = benchmark._consultar_postgres_ambiente(
+            None,
+            {"dbname": None, "user": None, "password": None},
+        )
+
+        self.assertEqual(resultado["status"], "nao_consultado_configuracao_incompleta")
+        self.assertIsNone(resultado["versao_servidor"])
+        self.assertTrue(all(
+            valor is None for valor in resultado["configuracoes"].values()
+        ))
 
     def test_wrappers_executam_as_duas_modalidades(self) -> None:
         for modulo in (benchmark_enem, benchmark_tse):

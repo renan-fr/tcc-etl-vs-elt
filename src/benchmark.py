@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
+import importlib.metadata
 import json
 import os
+import platform
 from pathlib import Path
 import random
+import re
+import struct
 import subprocess
 import sys
+from urllib.parse import unquote, urlsplit
+
+import psycopg2
+import psutil
+from dotenv import dotenv_values, load_dotenv
 
 try:
     from src.benchmark_paths import (
@@ -27,6 +36,36 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 VOLUMES_PADRAO = [100_000, 250_000, 500_000, 1_000_000]
 SEED_PADRAO = 20241027
 MODALIDADES = ("desempenho", "recursos")
+DEPENDENCIAS_AMBIENTE = (
+    ("pandas", "pandas"),
+    ("matplotlib", "matplotlib"),
+    ("python-dotenv", "dotenv"),
+    ("SQLAlchemy", "sqlalchemy"),
+    ("psycopg2", "psycopg2-binary"),
+    ("psutil", "psutil"),
+)
+PARAMETROS_POSTGRES = (
+    "shared_buffers",
+    "work_mem",
+    "maintenance_work_mem",
+    "effective_cache_size",
+    "max_parallel_workers",
+    "max_parallel_workers_per_gather",
+    "jit",
+    "fsync",
+    "synchronous_commit",
+    "random_page_cost",
+    "default_statistics_target",
+    "autovacuum",
+)
+PADRAO_URL_CREDENCIAL = re.compile(
+    r"(?i)\b(?:postgres(?:ql)?)(?:\+[^\s:]+)?://[^\s'\"]+"
+)
+PADRAO_CREDENCIAL = re.compile(
+    r"(?i)\b(?:[a-z0-9]+[_-])*"
+    r"(password|passwd|pwd|senha|token|secret|api[_-]?key|database[_-]?url)"
+    r"(?:\s*[:=]\s*|\s+)(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
+)
 
 
 def agora_iso() -> str:
@@ -51,6 +90,211 @@ def salvar_metadados(caminho: Path, metadados: dict[str, object]) -> None:
         encoding="utf-8",
     )
     temporario.replace(caminho)
+
+
+def _mensagem_erro_segura(erro: BaseException) -> str:
+    try:
+        mensagem = str(erro)
+    except Exception:
+        return "mensagem_indisponivel"
+    mensagem = PADRAO_URL_CREDENCIAL.sub("<url_postgresql_redigida>", mensagem)
+    mensagem = PADRAO_CREDENCIAL.sub(
+        lambda correspondencia: f"{correspondencia.group(1)}=<valor_redigido>",
+        mensagem,
+    )
+    return mensagem[:500]
+
+
+def _erro_persistivel(erro: BaseException, contexto: str) -> dict[str, str]:
+    return {
+        "tipo": type(erro).__name__,
+        "contexto": contexto,
+        "mensagem": _mensagem_erro_segura(erro),
+    }
+
+
+def _ambiente_declarado() -> dict[str, str]:
+    return {
+        "fabricante_modelo": "Acer Aspire 16 A16-71M-55H0",
+        "processador": "Intel Core Ultra 5 115U",
+        "memoria_ram": "16 GB",
+        "armazenamento": "SSD",
+        "sistema_operacional": "Windows 11",
+        "postgresql": "local",
+        "fontes_csv": "locais",
+        "rede_durante_benchmark": "sem transferência de rede",
+        "origem": "declaração metodológica do experimento; não é verificação do host atual",
+    }
+
+
+def _ambiente_indisponivel(erro: BaseException) -> dict[str, object]:
+    return {
+        "status": "falha_na_coleta",
+        "origem": "captura automática no início da campanha",
+        "erro": {
+            "tipo": type(erro).__name__,
+            "contexto": "coleta_ambiente",
+        },
+        "declarado_para_campanha_oficial": _ambiente_declarado(),
+        "capturado_automaticamente": None,
+    }
+
+
+def _versoes_dependencias() -> dict[str, str | None]:
+    versoes: dict[str, str | None] = {}
+    for nome, distribuicao in DEPENDENCIAS_AMBIENTE:
+        try:
+            versoes[nome] = importlib.metadata.version(distribuicao)
+        except importlib.metadata.PackageNotFoundError:
+            versoes[nome] = None
+    return versoes
+
+
+def _configuracao_postgres() -> tuple[
+    str | None, dict[str, object], dict[str, object]
+]:
+    arquivo_env = dotenv_values(BASE_DIR / ".env")
+    database_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
+    if database_url:
+        try:
+            partes = urlsplit(database_url)
+            porta = partes.port
+        except ValueError:
+            return database_url, {}, {
+                "host": None,
+                "porta": None,
+                "banco": None,
+            }
+        resumo = {
+            "host": partes.hostname,
+            "porta": porta,
+            "banco": unquote(partes.path.lstrip("/")) or None,
+        }
+        return database_url, {}, resumo
+
+    def valor(nome: str, padrao: str | None = None) -> str | None:
+        atual = os.getenv(nome)
+        if atual is not None:
+            return atual
+        arquivo = arquivo_env.get(nome)
+        return str(arquivo) if arquivo is not None else padrao
+
+    porta = valor("POSTGRES_PORT", "5432")
+    try:
+        porta_numero: int | None = int(porta) if porta is not None else None
+    except ValueError:
+        porta_numero = None
+    parametros = {
+        "host": valor("POSTGRES_HOST", "localhost"),
+        "port": porta_numero,
+        "dbname": valor("POSTGRES_DB"),
+        "user": valor("POSTGRES_USER"),
+        "password": valor("POSTGRES_PASSWORD"),
+    }
+    resumo = {
+        "host": parametros["host"],
+        "porta": parametros["port"],
+        "banco": parametros["dbname"],
+    }
+    return None, parametros, resumo
+
+
+def _consultar_postgres_ambiente(
+    database_url: str | None,
+    configuracao: dict[str, object],
+) -> dict[str, object]:
+    resultado: dict[str, object] = {
+        "versao_servidor": None,
+        "configuracoes": {parametro: None for parametro in PARAMETROS_POSTGRES},
+        "status": "indisponivel",
+        "origem": "consultas somente leitura na conexao da campanha",
+    }
+    if database_url is None and not all(
+        configuracao.get(nome)
+        for nome in ("dbname", "user", "password")
+    ):
+        resultado["status"] = "nao_consultado_configuracao_incompleta"
+        return resultado
+
+    conexao = None
+    cursor = None
+    try:
+        conexao = (
+            psycopg2.connect(database_url)
+            if database_url
+            else psycopg2.connect(**configuracao)
+        )
+        cursor = conexao.cursor()
+        cursor.execute("SELECT version()")
+        versao = cursor.fetchone()
+        resultado["versao_servidor"] = versao[0] if versao else None
+        configuracoes = resultado["configuracoes"]
+        assert isinstance(configuracoes, dict)
+        for parametro in PARAMETROS_POSTGRES:
+            cursor.execute(f"SHOW {parametro}")
+            valor = cursor.fetchone()
+            configuracoes[parametro] = valor[0] if valor else None
+        resultado["status"] = "consultado"
+    except Exception as erro:  # conexão é diagnóstico; não altera a campanha
+        resultado["status"] = "indisponivel"
+        resultado["erro_tipo"] = type(erro).__name__
+    finally:
+        if cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if conexao is not None:
+            try:
+                conexao.close()
+            except Exception:
+                pass
+    return resultado
+
+
+def coletar_ambiente() -> dict[str, object]:
+    """Captura o ambiente uma vez, sem assumir que este host é o oficial."""
+    database_url, parametros, conexao_resumo = _configuracao_postgres()
+    postgres = _consultar_postgres_ambiente(database_url, parametros)
+    try:
+        memoria_total = psutil.virtual_memory().total
+    except Exception:
+        memoria_total = None
+    capturado = {
+        "capturado_em": agora_iso(),
+        "sistema_operacional": {
+            "nome": platform.system() or None,
+            "versao": platform.version() or None,
+            "release": platform.release() or None,
+            "arquitetura": platform.machine() or None,
+            "origem": "platform",
+        },
+        "python": {
+            "versao": platform.python_version() or None,
+            "implementacao": platform.python_implementation() or None,
+            "arquitetura": f"{struct.calcsize('P') * 8}-bit",
+            "origem": "platform",
+        },
+        "dependencias": {
+            nome: versao for nome, versao in _versoes_dependencias().items()
+        },
+        "postgresql": {
+            **conexao_resumo,
+            **postgres,
+        },
+        "hardware": {
+            "processador": platform.processor() or None,
+            "cpus_logicas": os.cpu_count(),
+            "memoria_ram_total_bytes": memoria_total,
+            "origem": "platform, os e psutil",
+        },
+    }
+    return {
+        "status": "capturado_no_host_da_campanha",
+        "origem": "captura automática no início da campanha; valores null não foram observados",
+        "declarado_para_campanha_oficial": _ambiente_declarado(),
+        "capturado_automaticamente": capturado,
+    }
 
 
 def validar_git_limpo() -> None:
@@ -139,6 +383,11 @@ def main() -> None:
 
     metadados_caminho = campanha_dir / "campanha.json"
 
+    load_dotenv(BASE_DIR / ".env")
+    try:
+        ambiente_metadados = coletar_ambiente()
+    except Exception as erro:
+        ambiente_metadados = _ambiente_indisponivel(erro)
     ambiente = os.environ.copy()
     ambiente["BENCHMARK_RUN_ID"] = run_id
     ambiente["BENCHMARK_OUTPUT_DIR"] = str(campanha_dir)
@@ -168,6 +417,7 @@ def main() -> None:
         "inicio": agora_iso(),
         "fim": None,
         "commit_git": obter_commit_git(),
+        "ambiente": ambiente_metadados,
         "seed": args.seed,
         "volumes": args.volumes,
         "rodadas": args.rodadas,
@@ -229,7 +479,7 @@ def main() -> None:
             "interrompida" if isinstance(erro, KeyboardInterrupt) else "falhou"
         )
         metadados["fim"] = agora_iso()
-        metadados["erro"] = f"{type(erro).__name__}: {erro}"
+        metadados["erro"] = _erro_persistivel(erro, "execucao_pipeline")
         salvar_metadados(metadados_caminho, metadados)
         raise
 

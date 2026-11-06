@@ -322,6 +322,26 @@ O `campanha.json` registra `run_id`, status, horários de início e fim, commit
 Git, seed, volumes, número de rodadas, combinações, aquecimentos, execuções
 previstas e execuções concluídas.
 
+Também registra o objeto `ambiente`, capturado uma única vez no início da
+campanha. Ele contém duas partes:
+
+- `declarado_para_campanha_oficial`: ambiente oficial declarado para o TCC;
+- `capturado_automaticamente`: sistema operacional, Python, versões das
+  dependências, hardware básico e informações do PostgreSQL observadas no host
+  da campanha.
+
+O PostgreSQL é consultado somente com `SELECT version()` e `SHOW` para os
+parâmetros relevantes. Host, porta e banco são registrados sem credenciais;
+senhas, tokens e a URL completa de conexão nunca são gravados. Quando uma
+informação não pode ser coletada, o campo fica `null` ou recebe um status
+explícito de indisponibilidade. Para conferir os valores registrados, abra o
+`campanha.json` da campanha e compare `ambiente.declarado_para_campanha_oficial`
+com `ambiente.capturado_automaticamente`.
+
+Na campanha oficial, `capturado_automaticamente` deve ser conferido na máquina
+Acer Aspire 16 A16-71M-55H0 com Windows 11. Uma captura realizada em outro
+computador, como um macOS de preparação, não substitui essa validação.
+
 Os CSVs usam `;` como delimitador e registram `modalidade`,
 `monitoramento_ativo` e `intervalo_monitoramento_s`. Os tempos e o throughput de
 `desempenho` são oficiais; seus campos de CPU/RAM ficam vazios. CPU e RAM de
