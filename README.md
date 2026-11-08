@@ -146,6 +146,24 @@ uma com seu arquivo `.gitkeep`. As subpastas internas serão criadas durante a
 extração dos pacotes oficiais. Os arquivos baixados não são rastreados pelo
 Git; preserve nomes, colunas, codificação e delimitadores.
 
+### Verificação da integridade dos dados
+
+O repositório disponibiliza o arquivo `data/benchmark/integridade/hashes_fontes.sha256`, contendo os hashes SHA-256 dos 84 arquivos utilizados como referência para o experimento. O manifesto contempla os dois CSVs do ENEM, os arquivos estaduais das três fontes do TSE e os quatro manifestos de seleção dos subconjuntos.
+
+Após preparar os dados de entrada, é possível verificar sua correspondência com o manifesto utilizando:
+
+```powershell
+Get-Content data/benchmark/integridade/hashes_fontes.sha256 | ForEach-Object {
+    $hash, $caminho = $_ -split '  ', 2
+    $atual = (Get-FileHash -LiteralPath $caminho -Algorithm SHA256).Hash
+    if ($atual -ine $hash) {
+        Write-Output "DIVERGENTE: $caminho"
+    }
+}
+```
+
+A ausência de divergências indica que os arquivos encontrados correspondem aos hashes registrados. Essa verificação permite identificar modificações nas fontes, mas não certifica, por si só, sua autenticidade em relação aos arquivos originalmente publicados pelo INEP e pelo TSE.
+
 ### ENEM
 
 Na página do INEP, baixe o pacote oficial **Microdados do Enem 2024** e

@@ -195,8 +195,29 @@ class MonitorRecursos:
 
     def _coletar(self) -> None:
         try:
-            while not self._parar.wait(self.intervalo_segundos):
+            proxima_coleta = self._relogio() + self.intervalo_segundos
+
+            while not self._parar.is_set():
+                espera = max(0.0, proxima_coleta - self._relogio())
+
+                if self._parar.wait(espera):
+                    break
+
                 self._registrar_amostra()
+
+                proxima_coleta += self.intervalo_segundos
+
+                # Se uma coleta ultrapassar o prazo, pula os
+                # horarios perdidos sem executar coletas sobrepostas.
+                agora = self._relogio()
+                if proxima_coleta <= agora:
+                    intervalos_perdidos = (
+                        int((agora - proxima_coleta) // self.intervalo_segundos) + 1
+                    )
+                    proxima_coleta += (
+                        intervalos_perdidos * self.intervalo_segundos
+                    )
+
         except BaseException as erro:
             self._erro_thread = erro
             self._parar.set()

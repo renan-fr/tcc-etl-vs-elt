@@ -39,7 +39,7 @@ MODALIDADES = ("desempenho", "recursos")
 DEPENDENCIAS_AMBIENTE = (
     ("pandas", "pandas"),
     ("matplotlib", "matplotlib"),
-    ("python-dotenv", "dotenv"),
+    ("python-dotenv", "python-dotenv"),
     ("SQLAlchemy", "sqlalchemy"),
     ("psycopg2", "psycopg2-binary"),
     ("psutil", "psutil"),
