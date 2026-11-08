@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 import argparse
 import sys
-import threading
 import time
 from typing import Any
 
@@ -24,10 +23,14 @@ except ModuleNotFoundError:
         diretorio_modalidade_obrigatorio,
         validar_execucao_inedita,
     )
-import psutil
 import psycopg2
 from psycopg2 import sql
 from dotenv import load_dotenv
+
+try:
+    from src.resource_monitor import MonitorRecursos, vincular_conexao_postgres
+except ModuleNotFoundError:
+    from resource_monitor import MonitorRecursos, vincular_conexao_postgres
 
 
 VALORES_DESCONHECIDOS: list[dict[str, object]] = []
@@ -837,8 +840,11 @@ def obter_conexao_postgres(database_url: str | None = None) -> ConexaoPostgres:
 
 def _conectar_postgres(conexao_postgres: ConexaoPostgres):
     if isinstance(conexao_postgres, str):
-        return psycopg2.connect(conexao_postgres)
-    return psycopg2.connect(**conexao_postgres)
+        conexao = psycopg2.connect(conexao_postgres)
+    else:
+        conexao = psycopg2.connect(**conexao_postgres)
+    vincular_conexao_postgres(conexao)
+    return conexao
 
 
 def _criar_tabela(
@@ -992,95 +998,6 @@ def _imprimir_validacao(resultado: ResultadoValidacao) -> None:
         print("  Alertas: nenhum")
 
 
-class MonitorRecursos:
-    def __init__(self, intervalo_segundos: float = 0.5) -> None:
-        self.intervalo_segundos = intervalo_segundos
-        self._processo_python = psutil.Process()
-        self._parar = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._amostras: list[dict[str, float]] = []
-
-    def iniciar(self) -> None:
-        self._parar.clear()
-        self._processo_python.cpu_percent(interval=None)
-        self._thread = threading.Thread(target=self._coletar, daemon=True)
-        self._thread.start()
-
-    def parar(self) -> dict[str, float]:
-        self._parar.set()
-        if self._thread:
-            self._thread.join()
-        self._registrar_amostra()
-        return self._consolidar()
-
-    def _coletar(self) -> None:
-        while not self._parar.wait(self.intervalo_segundos):
-            self._registrar_amostra()
-
-    def _registrar_amostra(self) -> None:
-        processos_postgres = _obter_processos_postgres()
-
-        cpu_python = _cpu_percentual(self._processo_python)
-        ram_python = _memoria_rss(self._processo_python)
-        cpu_postgres = sum(_cpu_percentual(p) for p in processos_postgres)
-        ram_postgres = sum(_memoria_privada(p) for p in processos_postgres)
-
-        self._amostras.append(
-            {
-                "cpu_python": cpu_python,
-                "ram_python": float(ram_python),
-                "cpu_postgres": cpu_postgres,
-                "ram_postgres": float(ram_postgres),
-                "cpu_total": cpu_python + cpu_postgres,
-                "ram_total": float(ram_python + ram_postgres),
-            }
-        )
-
-    def _consolidar(self) -> dict[str, float]:
-        if not self._amostras:
-            return {
-                "cpu_media_python": 0.0,
-                "cpu_pico_python": 0.0,
-                "ram_media_python_mb": 0.0,
-                "ram_pico_python_mb": 0.0,
-                "cpu_media_postgres": 0.0,
-                "cpu_pico_postgres": 0.0,
-                "ram_media_postgres_mb": 0.0,
-                "ram_pico_postgres_mb": 0.0,
-                "cpu_media_total": 0.0,
-                "cpu_pico_total": 0.0,
-                "ram_media_total_mb": 0.0,
-                "ram_pico_total_mb": 0.0,
-            }
-
-        return {
-            "cpu_media_python": _media("cpu_python", self._amostras),
-            "cpu_pico_python": _maximo("cpu_python", self._amostras),
-            "ram_media_python_mb": _bytes_para_mb(
-                _media("ram_python", self._amostras)
-            ),
-            "ram_pico_python_mb": _bytes_para_mb(
-                _maximo("ram_python", self._amostras)
-            ),
-            "cpu_media_postgres": _media("cpu_postgres", self._amostras),
-            "cpu_pico_postgres": _maximo("cpu_postgres", self._amostras),
-            "ram_media_postgres_mb": _bytes_para_mb(
-                _media("ram_postgres", self._amostras)
-            ),
-            "ram_pico_postgres_mb": _bytes_para_mb(
-                _maximo("ram_postgres", self._amostras)
-            ),
-            "cpu_media_total": _media("cpu_total", self._amostras),
-            "cpu_pico_total": _maximo("cpu_total", self._amostras),
-            "ram_media_total_mb": _bytes_para_mb(
-                _media("ram_total", self._amostras)
-            ),
-            "ram_pico_total_mb": _bytes_para_mb(
-                _maximo("ram_total", self._amostras)
-            ),
-        }
-
-
 def _iniciar_monitoramento(
     benchmark: bool,
     monitorar_recursos: bool,
@@ -1090,54 +1007,6 @@ def _iniciar_monitoramento(
     monitor = MonitorRecursos(intervalo_segundos=0.5)
     monitor.iniciar()
     return monitor
-
-
-def _obter_processos_postgres() -> list[psutil.Process]:
-    processos = []
-    for processo in psutil.process_iter(["name"]):
-        try:
-            nome = (processo.info["name"] or "").lower()
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-        if "postgres" in nome:
-            processos.append(processo)
-    return processos
-
-
-def _cpu_percentual(processo: psutil.Process) -> float:
-    try:
-        return processo.cpu_percent(interval=None)
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        return 0.0
-
-
-def _memoria_rss(processo: psutil.Process) -> int:
-    try:
-        return processo.memory_info().rss
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        return 0
-
-
-def _memoria_privada(processo: psutil.Process) -> int:
-    try:
-        memoria = processo.memory_info()
-        if hasattr(memoria, "private"):
-            return memoria.private
-        return processo.memory_full_info().uss
-    except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
-        return 0
-
-
-def _media(chave: str, amostras: list[dict[str, float]]) -> float:
-    return sum(amostra[chave] for amostra in amostras) / len(amostras)
-
-
-def _maximo(chave: str, amostras: list[dict[str, float]]) -> float:
-    return max(amostra[chave] for amostra in amostras)
-
-
-def _bytes_para_mb(valor: float) -> float:
-    return valor / (1024 * 1024)
 
 
 def _salvar_resultado_benchmark(

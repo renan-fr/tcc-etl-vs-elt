@@ -7,7 +7,6 @@ from datetime import datetime
 from io import StringIO
 import os
 from pathlib import Path
-import threading
 import sys
 import time
 from typing import Iterator
@@ -24,9 +23,13 @@ except ModuleNotFoundError:
         diretorio_modalidade_obrigatorio,
         validar_execucao_inedita,
     )
-import psutil
 from psycopg2 import sql
 from dotenv import load_dotenv
+
+try:
+    from src.resource_monitor import MonitorRecursos, vincular_conexao_postgres
+except ModuleNotFoundError:
+    from resource_monitor import MonitorRecursos, vincular_conexao_postgres
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -211,71 +214,6 @@ class ResultadoValidacao:
         return not self.erros
 
 
-class MonitorRecursos:
-    def __init__(self, intervalo_segundos: float = 0.5) -> None:
-        self._processo_python = psutil.Process()
-        self._intervalo = intervalo_segundos
-        self._parar = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._amostras: list[dict[str, float]] = []
-
-    def iniciar(self) -> None:
-        self._parar.clear()
-        self._processo_python.cpu_percent(interval=None)
-        self._thread = threading.Thread(target=self._coletar, daemon=True)
-        self._thread.start()
-
-    def parar(self) -> dict[str, float]:
-        self._parar.set()
-        if self._thread:
-            self._thread.join()
-        self._registrar_amostra()
-        chaves = ("cpu_python", "ram_python", "cpu_postgres", "ram_postgres", "cpu_total", "ram_total")
-        if not self._amostras:
-            valores = {chave: [0.0] for chave in chaves}
-        else:
-            valores = {chave: [amostra[chave] for amostra in self._amostras] for chave in chaves}
-        return {
-            "cpu_media_python": sum(valores["cpu_python"]) / len(valores["cpu_python"]),
-            "cpu_pico_python": max(valores["cpu_python"]),
-            "ram_media_python_mb": sum(valores["ram_python"]) / len(valores["ram_python"]) / (1024 * 1024),
-            "ram_pico_python_mb": max(valores["ram_python"]) / (1024 * 1024),
-            "cpu_media_postgres": sum(valores["cpu_postgres"]) / len(valores["cpu_postgres"]),
-            "cpu_pico_postgres": max(valores["cpu_postgres"]),
-            "ram_media_postgres_mb": sum(valores["ram_postgres"]) / len(valores["ram_postgres"]) / (1024 * 1024),
-            "ram_pico_postgres_mb": max(valores["ram_postgres"]) / (1024 * 1024),
-            "cpu_media_total": sum(valores["cpu_total"]) / len(valores["cpu_total"]),
-            "cpu_pico_total": max(valores["cpu_total"]),
-            "ram_media_total_mb": sum(valores["ram_total"]) / len(valores["ram_total"]) / (1024 * 1024),
-            "ram_pico_total_mb": max(valores["ram_total"]) / (1024 * 1024),
-        }
-
-    def _coletar(self) -> None:
-        while not self._parar.wait(self._intervalo):
-            self._registrar_amostra()
-
-    def _registrar_amostra(self) -> None:
-        processos = []
-        for processo in psutil.process_iter(["name"]):
-            try:
-                if "postgres" in (processo.info["name"] or "").lower():
-                    processos.append(processo)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-        cpu_python = _cpu(self._processo_python)
-        ram_python = _ram(self._processo_python)
-        cpu_postgres = sum(_cpu(processo) for processo in processos)
-        ram_postgres = sum(_memoria_privada(processo) for processo in processos)
-        self._amostras.append({
-            "cpu_python": cpu_python,
-            "ram_python": float(ram_python),
-            "cpu_postgres": cpu_postgres,
-            "ram_postgres": float(ram_postgres),
-            "cpu_total": cpu_python + cpu_postgres,
-            "ram_total": float(ram_python + ram_postgres),
-        })
-
-
 def _iniciar_monitoramento(
     benchmark: bool,
     monitorar_recursos: bool,
@@ -287,40 +225,19 @@ def _iniciar_monitoramento(
     return monitor
 
 
-def _cpu(processo: psutil.Process) -> float:
-    try:
-        return processo.cpu_percent(interval=None)
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        return 0.0
-
-
-def _ram(processo: psutil.Process) -> int:
-    try:
-        return processo.memory_info().rss
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        return 0
-
-
-def _memoria_privada(processo: psutil.Process) -> int:
-    try:
-        memoria = processo.memory_info()
-        if hasattr(memoria, "private"):
-            return memoria.private
-        return processo.memory_full_info().uss
-    except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
-        return 0
-
-
 def obter_conexao(database_url: str | None = None):
     if database_url:
-        return psycopg2.connect(database_url)
-    return psycopg2.connect(
-        host=os.getenv("POSTGRES_HOST", "localhost"),
-        port=int(os.getenv("POSTGRES_PORT", "5432")),
-        dbname=os.getenv("POSTGRES_DB"),
-        user=os.getenv("POSTGRES_USER"),
-        password=os.getenv("POSTGRES_PASSWORD"),
-    )
+        conexao = psycopg2.connect(database_url)
+    else:
+        conexao = psycopg2.connect(
+            host=os.getenv("POSTGRES_HOST", "localhost"),
+            port=int(os.getenv("POSTGRES_PORT", "5432")),
+            dbname=os.getenv("POSTGRES_DB"),
+            user=os.getenv("POSTGRES_USER"),
+            password=os.getenv("POSTGRES_PASSWORD"),
+        )
+    vincular_conexao_postgres(conexao)
+    return conexao
 
 
 def criar_tabela_raw(cursor, schema: str, tabela: str, colunas: list[str]) -> None:
