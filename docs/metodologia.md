@@ -660,7 +660,23 @@ Versões e características do host são capturadas uma única vez, no início d
 campanha. A consulta ao PostgreSQL usa somente `SELECT version()` e `SHOW`, sem
 alterar parâmetros do servidor e sem gravar credenciais.
 
-Durante os benchmarks serão evitadas aplicações ou tarefas pesadas concorrentes.
+### Protocolo operacional da campanha
+
+A campanha oficial será executada com o notebook conectado à alimentação elétrica, utilizando o plano de energia Acer e o modo Equilibrado do Windows. Serão preservadas as configurações de desempenho mínimo (5%) e máximo (100%) do processador, sem alterações deliberadas nos limites de potência.
+
+Para evitar interrupções, a tampa permanecerá aberta e a hibernação automática durante a alimentação elétrica será temporariamente desativada. O equipamento será mantido sobre superfície rígida, com ventilação adequada.
+
+Antes do início da campanha, serão adotados os seguintes procedimentos:
+
+- encerramento de aplicações pesadas e prevenção de atualizações ou tarefas concorrentes durante as medições;
+- verificação da disponibilidade do PostgreSQL e manutenção de suas configurações;
+- conferência da integridade dos arquivos de entrada por meio do manifesto SHA-256 versionado no repositório;
+- confirmação da ausência de alterações não registradas no Git, identificação do commit e verificação do espaço disponível no SSD;
+- execução da certificação de equivalência entre os produtos finais das implementações ETL e ELT.
+
+A campanha utilizará uma única máquina, os mesmos conjuntos de dados e a mesma configuração operacional para ambas as arquiteturas. A ordem das execuções será randomizada com seed fixa, conforme o procedimento experimental definido.
+
+Em caso de interrupção ou falha que comprometa a campanha, os resultados parciais não serão combinados com os de outra campanha como se pertencessem à mesma execução experimental. Após a conclusão, serão conferidos os metadados e os arquivos de resultados, e a configuração original de hibernação será restaurada.
 
 ---
 
