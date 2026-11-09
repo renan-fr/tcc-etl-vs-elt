@@ -2,11 +2,11 @@
 
 ## 1. Objetivo do experimento
 
-O experimento tem como objetivo comparar o desempenho das abordagens ETL e ELT sob diferentes volumes de dados e níveis de complexidade de processamento.
+O experimento tem como objetivo comparar o desempenho das abordagens ETL e ELT sob diferentes volumes de dados e em dois cenários de processamento.
 
 A análise buscará responder principalmente:
 
-> **Em quais combinações de volume e complexidade de processamento ETL ou ELT apresenta melhor desempenho?**
+> **Como ETL e ELT se comportam, em cada dataset e volume, diante de cenários de processamento com características distintas?**
 
 A comparação será realizada em ambiente controlado, mantendo equivalentes as condições que não fazem parte do objeto de estudo e variando apenas os fatores relevantes para a comparação.
 
@@ -16,9 +16,9 @@ A comparação será realizada em ambiente controlado, mantendo equivalentes as 
 
 Serão utilizadas duas bases públicas com características distintas.
 
-### ENEM — base de menor complexidade
+### ENEM — cenário predominantemente por registro
 
-A base do ENEM representará o cenário de processamento mais simples.
+A base do ENEM representará um cenário com transformações predominantemente por registro.
 
 As transformações deverão envolver principalmente:
 
@@ -30,13 +30,14 @@ As transformações deverão envolver principalmente:
 
 Não há previsão de joins ou transformações relacionais complexas.
 
-### TSE — base de maior complexidade
+### TSE — cenário com múltiplas fontes e relações
 
-A base do TSE representará o cenário de maior complexidade.
+A base do TSE representará um cenário com múltiplas fontes e transformações relacionais.
 
-Por possuir estrutura potencialmente mais distribuída e demandar maior tratamento, poderá envolver operações adicionais, como relacionamentos entre dados, filtros, agregações e outras transformações necessárias.
-
-As operações exatas serão definidas após a exploração completa dos arquivos.
+O pipeline utiliza três fontes eleitorais, selecionadas por manifestos de chaves
+compartilhados e normalizadas para a construção do produto final. As operações
+implementadas incluem agregações de seções e candidatos, ranking determinístico
+de candidatos segundo os critérios definidos e joins entre as fontes.
 
 ### Bases de backup
 
@@ -109,7 +110,7 @@ volume_por_arquivo = 500000
 linhas_participantes = 500000
 linhas_resultados = 500000
 
-quantidade_registros_total = 1000000
+quantidade_registros = 1000000
 ```
 
 Para cada combinação de base e volume, ETL e ELT deverão utilizar exatamente o
@@ -151,8 +152,9 @@ realizar as transformações.
 
 A comparação não deverá ser prejudicada pela inclusão de etapas exclusivas em
 apenas uma das arquiteturas. Por isso, a complexidade da base será tratada como
-uma característica experimental do dataset, e não como exigência de que ENEM e
-TSE utilizem a mesma quantidade de camadas.
+uma característica associada ao dataset, e não como um fator independente
+manipulado separadamente. ENEM e TSE não precisam utilizar a mesma quantidade de
+camadas.
 
 ### ETL
 
@@ -190,7 +192,8 @@ Os dados serão inicialmente carregados em seu estado bruto no PostgreSQL. As tr
 
 ### ENEM — arquitetura simplificada
 
-Para a base ENEM, que representa o cenário de menor complexidade, será adotada
+Para a base ENEM, que representa o cenário com transformações predominantemente
+por registro, será adotada
 uma arquitetura simplificada.
 
 Fluxo conceitual do ETL:
@@ -270,7 +273,8 @@ estruturalmente equivalente entre as duas arquiteturas.
 
 ### TSE — arquitetura em camadas
 
-Para a base TSE, que representa o cenário de maior complexidade, será adotada
+Para a base TSE, que representa o cenário com características de processamento
+mais complexas, será adotada
 uma arquitetura em múltiplas camadas:
 
 ```text
@@ -358,9 +362,10 @@ múltiplas transformações e dependências
 arquitetura raw → staging → processed
 ```
 
-Isso permitirá avaliar não somente o comportamento de ETL e ELT diante do
-aumento do volume de dados, mas também diante do aumento da complexidade do
-processamento.
+Isso permitirá avaliar o comportamento de ETL e ELT diante do aumento do volume
+de dados em dois cenários de processamento distintos. A diferença entre os
+datasets será interpretada como uma característica associada ao cenário, não
+como evidência isolada do efeito da complexidade.
 
 Dentro de cada dataset, entretanto, ETL e ELT deverão executar transformações
 equivalentes e produzir o mesmo resultado final.
@@ -381,7 +386,8 @@ contrato final. A única diferença desejada será a arquitetura de processament
 transformação antes da carga, no ETL, ou transformação após a carga bruta, no
 ELT.
 
-A equivalência será validada por meio de critérios como:
+A equivalência será certificada previamente à campanha medida, por meio de
+critérios como:
 
 - quantidade de registros;
 - nomes e ordem das colunas;
@@ -393,8 +399,10 @@ A equivalência será validada por meio de critérios como:
 - comparação por hashes ou operações equivalentes;
 - verificação de diferenças entre os resultados.
 
-O objetivo é garantir que diferenças de tempo, CPU, RAM e throughput sejam
-atribuíveis à arquitetura do pipeline, e não a diferenças no resultado produzido.
+O objetivo metodológico é reduzir a possibilidade de que diferenças de tempo,
+CPU, RAM e throughput decorram de resultados diferentes. A equivalência funcional
+é um requisito a ser confirmado pela certificação, não uma conclusão antecipada
+da campanha.
 
 ---
 
@@ -412,27 +420,32 @@ O uso de métodos como `pandas.to_sql()` não será priorizado no benchmark prin
 
 ### Métrica principal
 
-A principal métrica será:
+A principal métrica para a comparação de desempenho será:
 
 **Tempo total de processamento**
 
 Ela representará o tempo necessário para levar o dado desde sua origem até o resultado final pronto para utilização.
 
 As validações de qualidade e a equivalência entre ETL e ELT serão executadas em
-uma etapa prévia de certificação. O benchmark oficial medirá somente leitura,
-transformação e carga. Isso evita que verificações auxiliares interfiram no
-tempo, no uso de recursos e no estado de cache das rodadas de desempenho.
+uma etapa prévia de certificação. No ETL, as validações internas ocorrem antes
+da carga; no ELT, depois da materialização das tabelas finais. Na campanha
+oficial, essas validações internas ficam desativadas. O benchmark medirá somente
+leitura, transformação e carga, evitando que verificações auxiliares interfiram
+no tempo, no uso de recursos e no estado de cache das rodadas de desempenho.
 
 ### Tempos por etapa
 
-Também serão registrados separadamente:
+Também serão registrados separadamente, como indicadores diagnósticos:
 
 - tempo de leitura;
 - tempo de transformação;
 - tempo de carga;
 - tempo total.
 
-As etapas serão definidas operacionalmente da seguinte forma:
+As etapas serão definidas operacionalmente da seguinte forma. Como as operações
+internas das duas arquiteturas não possuem fronteiras perfeitamente equivalentes,
+diferenças entre etapas isoladas não serão interpretadas automaticamente como
+vantagens arquiteturais:
 
 - `tempo_leitura`: leitura e interpretação dos arquivos de entrada, incluindo
   seleção de linhas e colunas;
@@ -460,7 +473,8 @@ Isso permitirá analisar tanto o pipeline completo quanto o comportamento isolad
 
 ### Throughput
 
-Será calculado o throughput do processamento:
+O throughput será uma métrica complementar ao `tempo_total`, pois é calculado a
+partir da quantidade de registros e do tempo total medido:
 
 ```text
 Throughput = quantidade de registros processados / tempo total
@@ -490,13 +504,14 @@ Serão registrados, sempre que tecnicamente viável:
 - média combinada associada ao pipeline;
 - pico combinado associado ao pipeline.
 
-O processo Python será medido por RSS. Para o PostgreSQL será usada a memória
-privada por processo, somada entre os processos do servidor. No Windows, a
+O processo Python é medido por RSS. Para o PostgreSQL é usada a memória privada
+por processo, somada entre os processos do servidor. No Windows, a
 fonte é `private bytes`; em sistemas nos quais esse campo não existe, será usada
 USS (`unique set size`). Ambas evitam contar repetidamente as páginas
-compartilhadas do PostgreSQL. A métrica combinada será RSS do Python mais
-memória privada do PostgreSQL e deverá ser interpretada como memória atribuível
-aos processos, não como consumo físico total do sistema.
+compartilhadas do PostgreSQL. A implementação atual registra uma métrica
+combinada como RSS do Python mais memória privada do PostgreSQL. Essa soma não
+representa necessariamente o consumo físico total de RAM e permanece provisória,
+sujeita à validação metodológica da Frente F2 e à orientação do professor.
 
 O consumo total do sistema operacional não será utilizado como principal
 referência, pois poderá incluir processos externos ao experimento. O tipo de
@@ -694,7 +709,9 @@ Os principais fatores deliberadamente modificados serão:
 
 - arquitetura: ETL ou ELT;
 - volume de dados: 100k, 250k, 500k e 1M;
-- complexidade do processamento, representada pelas características distintas das bases ENEM e TSE.
+- dataset/cenário: ENEM e TSE representam características distintas de
+  processamento, mas dataset e complexidade estão associados e não permitem
+  atribuir diferenças exclusivamente à complexidade.
 
 ### Variáveis dependentes
 
@@ -723,7 +740,10 @@ Serão mantidos equivalentes sempre que possível:
 - método de monitoramento;
 - condições gerais de execução.
 
-O foco do controle experimental será principalmente sobre fatores capazes de afetar ETL e ELT de maneira diferente.
+O foco do controle experimental será principalmente sobre fatores capazes de
+afetar ETL e ELT de maneira diferente. As comparações principais serão feitas
+dentro de cada dataset e volume; a comparação entre datasets caracteriza
+cenários distintos, não um teste isolado do efeito da complexidade.
 
 Fatores equivalentes para ambos serão padronizados e documentados, evitando complexidade experimental desnecessária.
 
@@ -767,7 +787,7 @@ aquecimento e a certificação não serão gravados no arquivo de desempenho.
 
 ```text
 dataset
-volume_nominal
+volume_configurado
 arquitetura
 rodada
 modalidade
@@ -778,11 +798,11 @@ tempo_transformacao
 tempo_carga
 tempo_total
 throughput
-cpu_media
-cpu_pico
-ram_media
-ram_pico
-quantidade_registros_total
+cpu_media_total
+cpu_pico_total
+ram_media_total_mb
+ram_pico_total_mb
+quantidade_registros
 timestamp
 ```
 
@@ -800,7 +820,7 @@ metadados em um diretório próprio. Se o
 sobrescrita. O orquestrador global exigirá uma árvore Git limpa antes de criar
 ou alterar resultados.
 
-Quando aplicável, o campo genérico de volume deverá ser complementado ou
+Quando aplicável, o campo de volume configurado deverá ser complementado ou
 substituído por campos mais específicos. Para a base ENEM, deverão ser
 registrados pelo menos:
 
@@ -809,7 +829,7 @@ dataset
 volume_por_arquivo
 linhas_participantes
 linhas_resultados
-quantidade_registros_total
+quantidade_registros
 arquitetura
 rodada
 tempo_leitura
@@ -817,12 +837,17 @@ tempo_transformacao
 tempo_carga
 tempo_total
 throughput
-cpu_media
-cpu_pico
-ram_media
-ram_pico
+cpu_media_total
+cpu_pico_total
+ram_media_total_mb
+ram_pico_total_mb
 timestamp
 ```
+
+Para o TSE, o registro também poderá conter os campos específicos gerados para
+as três fontes (`linhas_munzona`, `linhas_secao` e `linhas_candidato`) e para o
+produto final (`linhas_processadas`). Esses campos distinguem a quantidade
+efetiva de linhas por fonte do volume configurado.
 
 Sempre que possível, CPU e RAM também serão registradas separadamente para Python e PostgreSQL.
 
@@ -958,7 +983,13 @@ média objetiva.
 
 ### 16.5 Validações
 
-Cada tabela deverá ser validada antes da carga final. As validações abrangerão:
+Na certificação funcional prévia, cada tabela deverá ser validada no ponto
+correspondente ao pipeline. No ETL, as validações internas ocorrem antes da
+carga final. No ELT, ocorrem depois da materialização das tabelas finais. Na
+campanha oficial, as validações internas são desativadas para não interferirem
+nas medições; a certificação de equivalência entre ETL e ELT ocorre antes dela.
+
+As validações abrangerão:
 
 - presença e estrutura das colunas esperadas;
 - identificadores não nulos e sem duplicidade;
