@@ -538,15 +538,11 @@ Cada combinação de cenário e modalidade terá:
 
 A execução preliminar não será incluída nos resultados.
 
-As cinco execuções válidas serão utilizadas para reduzir a influência de oscilações pontuais do ambiente.
+As cinco execuções válidas serão utilizadas para reduzir a influência de oscilações pontuais do ambiente. A média aritmética será o principal indicador de tendência central, o desvio-padrão amostral (`ddof=1`) representará a dispersão e a mediana será utilizada como indicador complementar.
 
-Serão analisadas principalmente:
+A análise será feita separadamente por dataset e volume, sem misturar as bases ou os volumes. Não haverá exclusão automática de outliers: todas as cinco execuções válidas participarão dos cálculos.
 
-- média;
-- mediana;
-- dispersão dos resultados, quando relevante.
-
-A mediana poderá ser especialmente útil para reduzir o efeito de execuções atípicas.
+Serão calculadas média, desvio-padrão amostral e mediana para as métricas oficiais de cada modalidade.
 
 ---
 
@@ -836,6 +832,31 @@ vazios. CPU e RAM da modalidade `recursos`, coletadas a cada 0,5 segundo, são a
 métricas oficiais de recursos. Os tempos e throughput das execuções monitoradas
 continuam registrados somente para diagnóstico. A proveniência oficial e
 diagnóstica fica declarada em `campanha.json`.
+
+Na análise estatística, a modalidade `desempenho` consolidará `tempo_total` e
+`throughput`, podendo apresentar os tempos por etapa como indicadores
+diagnósticos. A modalidade `recursos` consolidará CPU média e de pico e RAM
+média e de pico usando os campos totais presentes nos CSVs; quando disponíveis,
+as métricas separadas de Python e PostgreSQL também serão consolidadas. Os
+tempos e o throughput dos CSVs de `recursos` não serão usados como resultados
+oficiais de desempenho.
+
+Para cada campanha, o comando `python3 src/analise_estatistica.py <run_id>`
+produzirá, sem alterar os CSVs de origem, os arquivos:
+
+```text
+data/benchmark/campanhas/<run_id>/analise/analise_desempenho.csv
+data/benchmark/campanhas/<run_id>/analise/analise_recursos.csv
+data/benchmark/campanhas/<run_id>/analise/comparacao_etl_elt.csv
+```
+
+Os dois primeiros terão uma linha por dataset, volume e arquitetura, com as
+colunas de média, desvio-padrão amostral, mediana e número de execuções para
+cada métrica. A tabela de
+comparação terá uma linha por dataset e volume, as três estatísticas de
+`tempo_total` de ETL e ELT e `reducao_tempo_pct`, calculada a partir das médias.
+Essa comparação descreve diferenças observadas e não constitui teste de
+hipótese ou evidência de diferença significativa.
 
 Esses registros serão armazenados de forma estruturada para posterior análise estatística, geração de gráficos e construção dos resultados apresentados no TCC.
 
