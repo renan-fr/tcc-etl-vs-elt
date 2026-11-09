@@ -22,12 +22,14 @@ try:
     from src.benchmark_paths import (
         criar_diretorio_campanha,
         criar_diretorios_modalidades,
+        DATASETS,
         validar_run_id,
     )
 except ModuleNotFoundError:  # execução direta: python src/benchmark.py
     from benchmark_paths import (
         criar_diretorio_campanha,
         criar_diretorios_modalidades,
+        DATASETS,
         validar_run_id,
     )
 
@@ -397,7 +399,7 @@ def main() -> None:
     cenarios = [
         (modalidade, dataset, volume, arquitetura)
         for modalidade in MODALIDADES
-        for dataset in ("enem", "tse")
+        for dataset in DATASETS
         for volume in args.volumes
         for arquitetura in ("etl", "elt")
     ]
@@ -419,6 +421,7 @@ def main() -> None:
         "commit_git": obter_commit_git(),
         "ambiente": ambiente_metadados,
         "seed": args.seed,
+        "datasets": list(DATASETS),
         "volumes": args.volumes,
         "rodadas": args.rodadas,
         "combinacoes": len(cenarios),

@@ -128,6 +128,10 @@ class MatrizEOrquestradorTest(unittest.TestCase):
         self.assertEqual(sum("--sem-monitoramento" in c for c in comandos_1), 8)
         self.assertEqual(metadados["combinacoes"], 8)
         self.assertEqual(metadados["cenarios_processamento"], 4)
+        self.assertEqual(metadados["datasets"], list(benchmark.DATASETS))
+        self.assertEqual(metadados["volumes"], [100000])
+        self.assertEqual(metadados["rodadas"], 1)
+        self.assertEqual(metadados["run_id"], "teste_7")
         self.assertEqual(metadados["aquecimentos"], 8)
         self.assertEqual(metadados["medicoes_validas"], 8)
         self.assertEqual(metadados["execucoes_previstas"], 16)
@@ -191,6 +195,10 @@ class MatrizEOrquestradorTest(unittest.TestCase):
         self.assertEqual(metadados["aquecimentos"], 32)
         self.assertEqual(metadados["medicoes_validas"], 160)
         self.assertEqual(metadados["execucoes_previstas"], 192)
+        self.assertEqual(metadados["datasets"], list(benchmark.DATASETS))
+        self.assertEqual(metadados["volumes"], [100000, 250000, 500000, 1000000])
+        self.assertEqual(metadados["rodadas"], 5)
+        self.assertEqual(metadados["run_id"], "completa")
 
 
 class AmbienteCampanhaTest(unittest.TestCase):

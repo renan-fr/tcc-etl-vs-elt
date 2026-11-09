@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import math
 from pathlib import Path
 import statistics
@@ -59,6 +60,33 @@ def _numero(valor: str | None, campo: str, arquivo: Path, linha: int) -> float:
     if not math.isfinite(numero):
         raise AnaliseError(f"{arquivo}:{linha}: valor numérico inválido em {campo}: {valor!r}")
     return numero
+
+
+def _metadados_campanha(campanha: Path, run_id: str) -> tuple[frozenset[str], frozenset[int]]:
+    caminho = campanha / "campanha.json"
+    if not caminho.is_file():
+        raise AnaliseError(
+            f"Metadados obrigatórios ausentes: {caminho}; não é possível determinar datasets e volumes esperados"
+        )
+    try:
+        metadados = json.loads(caminho.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as erro:
+        raise AnaliseError(f"Não foi possível ler os metadados da campanha {caminho}: {erro}") from erro
+    if not isinstance(metadados, dict):
+        raise AnaliseError(f"Metadados inválidos em {caminho}: o conteúdo deve ser um objeto JSON")
+    if metadados.get("run_id") != run_id:
+        raise AnaliseError(f"Metadados inválidos em {caminho}: run_id não corresponde à campanha solicitada")
+    datasets = metadados.get("datasets")
+    volumes = metadados.get("volumes")
+    if not isinstance(datasets, list) or not datasets or not all(isinstance(item, str) and item.strip() for item in datasets):
+        raise AnaliseError(f"Metadados inválidos em {caminho}: 'datasets' deve ser uma lista não vazia de nomes")
+    if not isinstance(volumes, list) or not volumes or not all(isinstance(item, int) and item > 0 for item in volumes):
+        raise AnaliseError(f"Metadados inválidos em {caminho}: 'volumes' deve ser uma lista não vazia de inteiros positivos")
+    datasets_normalizados = frozenset(item.strip().lower() for item in datasets)
+    volumes_normalizados = frozenset(volumes)
+    if len(datasets_normalizados) != len(datasets) or len(volumes_normalizados) != len(volumes):
+        raise AnaliseError(f"Metadados inválidos em {caminho}: datasets e volumes não podem conter duplicidades")
+    return datasets_normalizados, volumes_normalizados
 
 
 def _rodada(valor: str | None, arquivo: Path, linha: int) -> int | None:
@@ -137,22 +165,52 @@ def _ler_modalidade(campanha: Path, modalidade: str, run_id: str) -> list[dict[s
                             if metrica in RESOURCE_METRIC_ALIASES
                             else metrica
                         )
-                    registro[metrica] = _numero(bruto.get(campo), campo or metrica, arquivo, numero_linha)
+                    valor = _numero(bruto.get(campo), campo or metrica, arquivo, numero_linha)
+                    if modalidade == "desempenho" and valor <= 0:
+                        raise AnaliseError(f"{arquivo}:{numero_linha}: {campo} deve ser positivo")
+                    if modalidade == "recursos" and valor < 0:
+                        raise AnaliseError(f"{arquivo}:{numero_linha}: {campo} não pode ser negativo")
+                    registro[metrica] = valor
+                if modalidade == "recursos":
+                    for metrica in PERFORMANCE_METRICS + DIAGNOSTIC_TIME_METRICS:
+                        if metrica in campos:
+                            valor = _numero(bruto.get(metrica), metrica, arquivo, numero_linha)
+                            if valor <= 0:
+                                raise AnaliseError(f"{arquivo}:{numero_linha}: {metrica} deve ser positivo")
                 registros.append(registro)
     return registros
 
 
-def _validar_completude(registros: list[dict[str, object]], modalidade: str) -> None:
+def _validar_completude(
+    registros: list[dict[str, object]],
+    modalidade: str,
+    datasets_esperados: frozenset[str],
+    volumes_esperados: frozenset[int],
+) -> None:
     grupos: dict[tuple[str, int], dict[str, set[int]]] = {}
     for registro in registros:
         chave = (str(registro["dataset"]), int(registro["volume_configurado"]))
         grupos.setdefault(chave, {}).setdefault(str(registro["arquitetura"]), set()).add(int(registro["rodada"]))
-    if not grupos:
-        raise AnaliseError(f"Nenhuma execução válida encontrada para {modalidade}")
+    cenarios_esperados = {
+        (dataset, volume, arquitetura)
+        for dataset in datasets_esperados
+        for volume in volumes_esperados
+        for arquitetura in ARQUITETURAS
+    }
+    cenarios_encontrados = {
+        (dataset, volume, arquitetura)
+        for (dataset, volume), arquiteturas in grupos.items()
+        for arquitetura in arquiteturas
+    }
     erros: list[str] = []
+    faltantes = sorted(cenarios_esperados - cenarios_encontrados)
+    extras = sorted(cenarios_encontrados - cenarios_esperados)
+    if faltantes:
+        erros.append(f"{modalidade}: cenários esperados ausentes: {faltantes}")
+    if extras:
+        erros.append(f"{modalidade}: cenários não definidos nos metadados: {extras}")
     for (dataset, volume), arquiteturas in sorted(grupos.items()):
-        for arquitetura in ARQUITETURAS:
-            rodadas = arquiteturas.get(arquitetura, set())
+        for arquitetura, rodadas in sorted(arquiteturas.items()):
             if rodadas != EXPECTED_ROUNDS:
                 erros.append(f"{modalidade}: {dataset}/{volume}/{arquitetura}: esperadas {sorted(EXPECTED_ROUNDS)}, encontradas {sorted(rodadas)}")
     if erros:
@@ -190,7 +248,12 @@ def _comparar(desempenho: list[dict[str, object]]) -> list[dict[str, object]]:
         if etl is None or elt is None:
             raise AnaliseError(f"Comparação impossível: falta ETL ou ELT em {dataset}/{volume}")
         media_etl = float(etl["tempo_total_media"])
-        reducao = ((media_etl - float(elt["tempo_total_media"])) / media_etl) * 100 if media_etl else 0.0
+        media_elt = float(elt["tempo_total_media"])
+        if media_etl <= 0 or media_elt <= 0:
+            raise AnaliseError(
+                f"Comparação impossível em {dataset}/{volume}: médias de tempo_total devem ser positivas"
+            )
+        reducao = ((media_etl - media_elt) / media_etl) * 100
         saida.append({
             "dataset": dataset, "volume_configurado": volume,
             "tempo_total_etl_media": media_etl,
@@ -220,10 +283,11 @@ def analisar_campanha(run_id: str, base_dir: Path | None = None) -> Path:
     campanha = (base_dir or CAMPANHAS_DIR) / run_id
     if not campanha.is_dir():
         raise AnaliseError(f"Campanha não encontrada: {campanha}")
+    datasets_esperados, volumes_esperados = _metadados_campanha(campanha, run_id)
     desempenho = _ler_modalidade(campanha, "desempenho", run_id)
     recursos = _ler_modalidade(campanha, "recursos", run_id)
-    _validar_completude(desempenho, "desempenho")
-    _validar_completude(recursos, "recursos")
+    _validar_completude(desempenho, "desempenho", datasets_esperados, volumes_esperados)
+    _validar_completude(recursos, "recursos", datasets_esperados, volumes_esperados)
     saidas = {
         "analise_desempenho.csv": _agrupar(desempenho, PERFORMANCE_METRICS + DIAGNOSTIC_TIME_METRICS),
         "analise_recursos.csv": _agrupar(

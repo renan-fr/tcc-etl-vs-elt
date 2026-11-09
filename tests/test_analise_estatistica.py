@@ -1,4 +1,5 @@
 import csv
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -37,6 +38,11 @@ class TestAnaliseEstatistica(unittest.TestCase):
                                 if separated:
                                     linha.update(cpu_media_python="1", cpu_pico_python="2", ram_media_python_mb="3", ram_pico_python_mb="4", cpu_media_postgres="5", cpu_pico_postgres="6", ram_media_postgres_mb="7", ram_pico_postgres_mb="8")
                             escritor.writerow(linha)
+        (campanha / "campanha.json").write_text(json.dumps({
+            "run_id": "campanha_teste",
+            "datasets": ["enem", "tse"],
+            "volumes": list(volumes),
+        }), encoding="utf-8")
         return campanha
 
     def test_gera_estatisticas_com_separacao_e_comparacao(self):
@@ -139,6 +145,69 @@ class TestAnaliseEstatistica(unittest.TestCase):
             campanha = self._criar_campanha(Path(temporario))
             (campanha / "desempenho" / "enem_elt.csv").unlink()
             with self.assertRaisesRegex(AnaliseError, "elt"):
+                analisar_campanha("campanha_teste", Path(temporario))
+
+    def test_cenario_definido_nos_metadados_mas_ausente_falha(self):
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = self._criar_campanha(Path(temporario), volumes=(100000, 250000, 500000, 1000000))
+            for modalidade in ("desempenho", "recursos"):
+                for arquitetura in ("etl", "elt"):
+                    caminho = campanha / modalidade / f"enem_{arquitetura}.csv"
+                    with caminho.open(encoding="utf-8", newline="") as arquivo:
+                        leitor = csv.DictReader(arquivo, delimiter=";")
+                        campos = leitor.fieldnames
+                        linhas = [linha for linha in leitor if linha["volume_configurado"] != "250000"]
+                    with caminho.open("w", encoding="utf-8", newline="") as arquivo:
+                        escritor = csv.DictWriter(arquivo, fieldnames=campos, delimiter=";")
+                        escritor.writeheader()
+                        escritor.writerows(linhas)
+            with self.assertRaisesRegex(AnaliseError, "cenários esperados ausentes"):
+                analisar_campanha("campanha_teste", Path(temporario))
+
+    def test_metadados_sem_conjunto_esperado_falham(self):
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = self._criar_campanha(Path(temporario))
+            (campanha / "campanha.json").write_text(json.dumps({"run_id": "campanha_teste", "volumes": [100000]}), encoding="utf-8")
+            with self.assertRaisesRegex(AnaliseError, "datasets"):
+                analisar_campanha("campanha_teste", Path(temporario))
+
+    def test_tempos_ou_throughput_nao_positivos_falham(self):
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = self._criar_campanha(Path(temporario))
+            caminho = campanha / "desempenho" / "enem_etl.csv"
+            with caminho.open(encoding="utf-8", newline="") as arquivo:
+                linhas = list(csv.DictReader(arquivo, delimiter=";"))
+                campos = list(linhas[0])
+            linhas[0]["tempo_total"] = "0"
+            with caminho.open("w", encoding="utf-8", newline="") as arquivo:
+                escritor = csv.DictWriter(arquivo, fieldnames=campos, delimiter=";")
+                escritor.writeheader()
+                escritor.writerows(linhas)
+            with self.assertRaisesRegex(AnaliseError, "tempo_total deve ser positivo"):
+                analisar_campanha("campanha_teste", Path(temporario))
+
+            linhas[0]["tempo_total"] = "1"
+            linhas[0]["throughput"] = "-1"
+            with caminho.open("w", encoding="utf-8", newline="") as arquivo:
+                escritor = csv.DictWriter(arquivo, fieldnames=campos, delimiter=";")
+                escritor.writeheader()
+                escritor.writerows(linhas)
+            with self.assertRaisesRegex(AnaliseError, "throughput deve ser positivo"):
+                analisar_campanha("campanha_teste", Path(temporario))
+
+    def test_cpu_e_ram_negativas_falham(self):
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = self._criar_campanha(Path(temporario))
+            caminho = campanha / "recursos" / "enem_etl.csv"
+            with caminho.open(encoding="utf-8", newline="") as arquivo:
+                linhas = list(csv.DictReader(arquivo, delimiter=";"))
+                campos = list(linhas[0])
+            linhas[0]["cpu_media_total"] = "-0,1"
+            with caminho.open("w", encoding="utf-8", newline="") as arquivo:
+                escritor = csv.DictWriter(arquivo, fieldnames=campos, delimiter=";")
+                escritor.writeheader()
+                escritor.writerows(linhas)
+            with self.assertRaisesRegex(AnaliseError, "cpu_media_total não pode ser negativo"):
                 analisar_campanha("campanha_teste", Path(temporario))
 
 
