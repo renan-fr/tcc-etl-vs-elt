@@ -489,33 +489,44 @@ Serão registrados:
 - uso médio de CPU;
 - pico de CPU.
 
-Sempre que possível, o consumo associado ao Python e ao PostgreSQL será registrado separadamente e também considerado de forma combinada.
+O processo Python e os processos PostgreSQL são expressos como percentual de um
+núcleo lógico, sem normalização pelo número total de CPUs. A soma pode,
+portanto, ultrapassar 100%. A média de CPU é ponderada pela duração dos
+intervalos válidos e o pico é o maior valor observado.
 
 ### Memória RAM
 
-Será utilizado principalmente o pico de memória RAM durante cada execução.
+A métrica de memória será a USS (*Unique Set Size*), obtida homogeneamente para
+Python e PostgreSQL por meio de `psutil.Process.memory_full_info().uss`. USS
+representa a memória física exclusiva atribuída ao processo e exclui as páginas
+compartilhadas com outros processos. Ela não representa a RAM física total do
+sistema nem o consumo incremental causado exclusivamente pelo pipeline.
 
-Serão registrados, sempre que tecnicamente viável:
+Para o Python, é monitorado o processo que executa o pipeline. Para o
+PostgreSQL, a instância é identificada a partir do PID de backend da conexão
+real; a USS é então somada apenas para os processos pertencentes à árvore dessa
+instância.
 
-- média de RAM do Python;
-- pico de RAM do Python;
-- média de RAM do PostgreSQL;
-- pico de RAM do PostgreSQL;
-- média combinada associada ao pipeline;
-- pico combinado associado ao pipeline.
+Em cada amostra são calculados:
 
-O processo Python é medido por RSS. Para o PostgreSQL é usada a memória privada
-por processo, somada entre os processos do servidor. No Windows, a
-fonte é `private bytes`; em sistemas nos quais esse campo não existe, será usada
-USS (`unique set size`). Ambas evitam contar repetidamente as páginas
-compartilhadas do PostgreSQL. A implementação atual registra uma métrica
-combinada como RSS do Python mais memória privada do PostgreSQL. Essa soma não
-representa necessariamente o consumo físico total de RAM e permanece provisória,
-sujeita à validação metodológica da Frente F2 e à orientação do professor.
+- `ram_python`: USS do processo Python;
+- `ram_postgres`: soma da USS dos processos PostgreSQL participantes;
+- `ram_total`: soma dos dois componentes na mesma amostra.
 
-O consumo total do sistema operacional não será utilizado como principal
-referência, pois poderá incluir processos externos ao experimento. O tipo de
-métrica usado por componente será registrado em cada linha do resultado.
+Antes da primeira conexão PostgreSQL, o processo Python já participa do
+pipeline, mas a instância PostgreSQL ainda não foi vinculada. Nesse intervalo,
+`ram_python` é a USS efetivamente medida, `ram_postgres` é zero por convenção de
+participação — não por uma leitura USS igual a zero — e `ram_total` é igual à
+USS Python.
+
+Depois da primeira vinculação, o PostgreSQL permanece participante até o final
+da execução, inclusive entre conexões posteriores. A média de PostgreSQL é a
+média aritmética das amostras e inclui os zeros convencionais anteriores à
+primeira conexão. O pico é o maior valor observado. A mesma regra de média e
+pico é aplicada à RAM Python e à RAM total.
+
+O consumo total do sistema operacional não será utilizado como referência, pois
+poderia incluir processos externos ao experimento.
 
 ---
 
@@ -527,17 +538,23 @@ não será instanciado e nenhuma thread de coleta será iniciada.
 
 Durante cada execução, serão coletadas amostras aproximadamente a cada **0,5 segundo**.
 
-O monitoramento acompanhará principalmente os processos relacionados ao:
+O monitor é executado dentro do próprio processo Python de cada pipeline. Ele
+acompanha esse processo e, depois da primeira conexão local, a árvore de
+processos PostgreSQL vinculada ao backend da conexão. A árvore é redescoberta
+durante a execução para incluir processos novos e retirar processos encerrados,
+com proteção contra reutilização de PID.
 
-- Python;
-- PostgreSQL.
+Para CPU, a média é ponderada pela duração dos intervalos válidos e o pico é o
+maior valor observado. Para RAM, a média é aritmética sobre as amostras válidas
+e o pico é o maior valor observado. A RAM total é calculada em cada instante
+como `ram_python + ram_postgres`; ela não é obtida somando os picos individuais.
 
-Ao término de cada execução serão calculados valores consolidados como:
-
-- CPU média;
-- CPU máxima;
-- RAM média;
-- RAM máxima.
+Encerramentos detectados durante a leitura de CPU são tratados como remoção
+normal do processo e não invalidam automaticamente a amostra de RAM. Se um
+processo encerrar durante a leitura de USS, a amostra correspondente de RAM
+fica incompleta e não é usada como válida. `AccessDenied`, USS indisponível e
+falhas inesperadas geram erro explícito; não há substituição silenciosa por RSS,
+memória privada ou zero.
 
 O mesmo procedimento de monitoramento será aplicado a todos os cenários da
 modalidade `recursos`. O intervalo permanecerá fixo em 0,5 segundo.
@@ -663,6 +680,12 @@ Antes da campanha oficial deverão ser documentados:
 O tipo e modelo do armazenamento é uma informação declarada manualmente, pois
 não é identificado de forma portável pelo orquestrador.
 
+No Windows 11 do Acer, a coleta de USS dos processos PostgreSQL exigirá a
+execução do PowerShell com privilégios administrativos. A campanha oficial
+deverá preservar o mesmo nível de privilégios nas duas arquiteturas e nas duas
+modalidades, para que a disponibilidade da métrica não seja um fator de
+comparação.
+
 O orquestrador grava essas informações no objeto `ambiente` de
 `campanha.json`. O objeto separa `declarado_para_campanha_oficial` de
 `capturado_automaticamente`: a segunda seção descreve o host que executou a
@@ -785,7 +808,10 @@ das estatísticas finais, totalizando 192 execuções de pipeline na campanha.
 Cada execução válida deverá gerar automaticamente um registro estruturado. O
 aquecimento e a certificação não serão gravados no arquivo de desempenho.
 
+Os campos comuns aos CSVs são:
+
 ```text
+run_id
 dataset
 volume_configurado
 arquitetura
@@ -798,13 +824,25 @@ tempo_transformacao
 tempo_carga
 tempo_total
 throughput
+cpu_media_python
+cpu_pico_python
+ram_media_python_mb
+ram_pico_python_mb
+cpu_media_postgres
+cpu_pico_postgres
+ram_media_postgres_mb
+ram_pico_postgres_mb
 cpu_media_total
 cpu_pico_total
 ram_media_total_mb
 ram_pico_total_mb
-quantidade_registros
 timestamp
 ```
+
+Os CSVs do ENEM acrescentam `quantidade_registros`,
+`linhas_participantes` e `linhas_resultados`. Os CSVs do TSE acrescentam
+`quantidade_registros`, `linhas_munzona`, `linhas_secao`, `linhas_candidato` e
+`linhas_processadas`.
 
 Cada linha também conterá um `run_id`, usado para identificar a campanha à qual
 o resultado pertence. A campanha oficial usará `oficial_01`.
@@ -820,28 +858,12 @@ metadados em um diretório próprio. Se o
 sobrescrita. O orquestrador global exigirá uma árvore Git limpa antes de criar
 ou alterar resultados.
 
-Quando aplicável, o campo de volume configurado deverá ser complementado ou
-substituído por campos mais específicos. Para a base ENEM, deverão ser
-registrados pelo menos:
+Para a base ENEM, os campos específicos efetivamente gravados são:
 
 ```text
-dataset
-volume_por_arquivo
+quantidade_registros
 linhas_participantes
 linhas_resultados
-quantidade_registros
-arquitetura
-rodada
-tempo_leitura
-tempo_transformacao
-tempo_carga
-tempo_total
-throughput
-cpu_media_total
-cpu_pico_total
-ram_media_total_mb
-ram_pico_total_mb
-timestamp
 ```
 
 Para o TSE, o registro também poderá conter os campos específicos gerados para
@@ -849,7 +871,10 @@ as três fontes (`linhas_munzona`, `linhas_secao` e `linhas_candidato`) e para o
 produto final (`linhas_processadas`). Esses campos distinguem a quantidade
 efetiva de linhas por fonte do volume configurado.
 
-Sempre que possível, CPU e RAM também serão registradas separadamente para Python e PostgreSQL.
+CPU e RAM são registradas separadamente para Python e PostgreSQL nos campos
+listados acima. Não existe um campo adicional que registre, em cada linha, o
+"tipo de métrica"; a definição USS e a convenção pré-conexão fazem parte deste
+protocolo metodológico.
 
 Os tempos por etapa, `tempo_total` e throughput da modalidade `desempenho` são
 as métricas oficiais de desempenho; os campos de CPU e RAM dessas linhas ficam

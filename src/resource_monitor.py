@@ -76,6 +76,7 @@ class MonitorRecursos:
         self._processos_postgres: dict[tuple[int, float], psutil.Process] = {}
         self._raiz_postgres: psutil.Process | None = None
         self._identidade_raiz: tuple[int, float] | None = None
+        self._postgres_vinculado = False
         self._ultimo_instante: float | None = None
         self._ultimo_instante_postgres: float | None = None
         self._erro_thread: BaseException | None = None
@@ -158,6 +159,7 @@ class MonitorRecursos:
             self._raiz_postgres = raiz
             self._identidade_raiz = self._identidade(raiz)
             self._descobrir_e_inicializar_processos()
+            self._postgres_vinculado = True
             if primeira_vinculacao:
                 self._processo_python.cpu_percent(interval=None)
                 fronteira = self._relogio()
@@ -363,18 +365,21 @@ class MonitorRecursos:
                 )
                 else None
             )
-            # A RAM usa a mesma arvore da instancia vinculada. Um processo
-            # encerrado durante a leitura invalida a amostra de PostgreSQL;
-            # nunca e convertido em zero.
+            # Antes da primeira vinculacao, PostgreSQL participa por
+            # convencao: zero nao e uma leitura de USS. Depois da
+            # vinculacao, a soma vem exclusivamente das leituras USS da
+            # arvore da instancia. Um processo encerrado durante USS
+            # invalida a amostra, nunca e convertido em zero.
             ram_postgres: int | None = 0
             ram_postgres_incompleta = False
-            for identidade, processo in list(self._processos_postgres.items()):
-                valor = self._ler_ram_postgres(processo)
-                if valor is None:
-                    ram_postgres_incompleta = True
-                    self._processos_postgres.pop(identidade, None)
-                else:
-                    ram_postgres += valor
+            if self._postgres_vinculado:
+                for identidade, processo in list(self._processos_postgres.items()):
+                    valor = self._ler_ram_postgres(processo)
+                    if valor is None:
+                        ram_postgres_incompleta = True
+                        self._processos_postgres.pop(identidade, None)
+                    else:
+                        ram_postgres += valor
             if ram_postgres_incompleta:
                 ram_postgres = None
             ram_total = (

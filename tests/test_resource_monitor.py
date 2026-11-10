@@ -94,6 +94,20 @@ class MonitorRecursosTest(unittest.TestCase):
         self.assertTrue(monitor._thread.iniciada)
         monitor._desregistrar()
 
+    def test_pre_conexao_usa_uss_python_e_zero_postgres_por_convencao(self) -> None:
+        python = ProcessoFalso(10, nome="python.exe", cpu=[0.0, 5.0], uss=123)
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos(relogio=mock.Mock(return_value=1.0))
+        monitor._ultimo_instante = 0.0
+
+        monitor._registrar_amostra()
+
+        amostra = monitor._amostras[-1]
+        self.assertFalse(monitor._postgres_vinculado)
+        self.assertEqual(amostra["ram_python"], 123.0)
+        self.assertEqual(amostra["ram_postgres"], 0.0)
+        self.assertEqual(amostra["ram_total"], 123.0)
+
     def test_vinculo_prima_postgres_e_novo_processo_sem_contar_primeira_leitura(self) -> None:
         python = ProcessoFalso(
             10, nome="python.exe", cpu=[0.0, 10.0, 0.0, 20.0, 30.0]
@@ -209,7 +223,29 @@ class MonitorRecursosTest(unittest.TestCase):
         self.assertEqual(amostra["ram_python"], 7.0)
         self.assertEqual(amostra["ram_postgres"], 11.0)
         self.assertEqual(amostra["ram_total"], 18.0)
+        self.assertTrue(monitor._postgres_vinculado)
+        self.assertEqual(monitor._amostras[-2]["ram_postgres"], 0.0)
+        self.assertEqual(monitor._amostras[-2]["ram_total"], 7.0)
         iterar.assert_not_called()
+
+    def test_participacao_postgres_permanece_entre_conexoes_da_mesma_instancia(self) -> None:
+        python = ProcessoFalso(10, nome="python.exe", cpu=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0])
+        raiz = ProcessoFalso(20, cpu=[0.0, 2.0, 3.0, 4.0], uss=11)
+        relogio = mock.Mock(side_effect=[1.0, 1.0, 2.0, 3.0])
+        with mock.patch.object(rm.psutil, "Process", side_effect=[python, raiz, raiz]), mock.patch.object(
+            rm.psutil, "process_iter", return_value=[]
+        ):
+            monitor = rm.MonitorRecursos(relogio=relogio)
+            python.cpu_percent(interval=None)
+            monitor._ultimo_instante = 0.0
+            monitor.vincular_conexao_postgres(self._conexao())
+            monitor._registrar_amostra()
+            monitor.vincular_conexao_postgres(self._conexao())
+            monitor._registrar_amostra()
+
+        self.assertTrue(monitor._postgres_vinculado)
+        self.assertEqual(monitor._amostras[-1]["ram_postgres"], 11.0)
+        self.assertEqual(monitor._amostras[-1]["ram_total"], 4107.0)
 
     def test_uss_indisponivel_invalida_medicao_explicitamente(self) -> None:
         processo = ProcessoFalso(10, nome="python.exe", uss=AttributeError())
@@ -290,6 +326,32 @@ class MonitorRecursosTest(unittest.TestCase):
         self.assertAlmostEqual(resultado["ram_media_python_mb"], 200 / 1024**2)
         self.assertAlmostEqual(resultado["ram_media_postgres_mb"], 400 / 1024**2)
         self.assertAlmostEqual(resultado["ram_media_total_mb"], 700 / 1024**2)
+        self.assertAlmostEqual(resultado["ram_pico_total_mb"], 700 / 1024**2)
+
+    def test_media_e_pico_incluem_amostras_pre_e_pos_conexao(self) -> None:
+        python = ProcessoFalso(10, nome="python.exe")
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos()
+        monitor._amostras = [
+            {
+                "duracao_cpu_python": 1.0, "duracao_cpu_postgres": None,
+                "duracao_cpu_total": None, "cpu_python": 10.0,
+                "cpu_postgres": None, "cpu_total": None,
+                "ram_python": 100.0, "ram_postgres": 0.0, "ram_total": 100.0,
+            },
+            {
+                "duracao_cpu_python": 1.0, "duracao_cpu_postgres": 1.0,
+                "duracao_cpu_total": 1.0, "cpu_python": 20.0,
+                "cpu_postgres": 30.0, "cpu_total": 50.0,
+                "ram_python": 300.0, "ram_postgres": 400.0, "ram_total": 700.0,
+            },
+        ]
+
+        resultado = monitor._consolidar()
+
+        self.assertAlmostEqual(resultado["ram_media_postgres_mb"], 200 / 1024**2)
+        self.assertAlmostEqual(resultado["ram_pico_postgres_mb"], 400 / 1024**2)
+        self.assertAlmostEqual(resultado["ram_media_total_mb"], 400 / 1024**2)
         self.assertAlmostEqual(resultado["ram_pico_total_mb"], 700 / 1024**2)
 
     def test_excecao_da_thread_e_capturada_e_comunicada_no_parar(self) -> None:
