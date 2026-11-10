@@ -282,39 +282,38 @@ class MonitorRecursos:
             ) from erro
 
     @staticmethod
-    def _ler_ram_python(processo: psutil.Process) -> int:
+    def _ler_ram_python(processo: psutil.Process) -> int | None:
         try:
-            return processo.memory_info().rss
-        except (psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied):
-            return 0
+            memoria = processo.memory_full_info()
+            return int(memoria.uss)
+        except (psutil.NoSuchProcess, psutil.ZombieProcess):
+            # O processo pode terminar entre a descoberta e a leitura. Isso
+            # invalida esta amostra, mas nao e uma falha do monitor.
+            return None
+        except psutil.AccessDenied as erro:
+            raise ErroMonitoramentoRecursos(
+                f"Acesso negado ao ler USS de Python (PID {processo.pid})."
+            ) from erro
+        except AttributeError as erro:
+            raise ErroMonitoramentoRecursos(
+                "USS nao esta disponivel para o processo Python."
+            ) from erro
 
     @staticmethod
-    def _ler_ram_postgres(processo: psutil.Process) -> int:
+    def _ler_ram_postgres(processo: psutil.Process) -> int | None:
         try:
-            memoria = processo.memory_info()
-            if hasattr(memoria, "private"):
-                return memoria.private
-            return processo.memory_full_info().uss
-        except (
-            psutil.NoSuchProcess,
-            psutil.ZombieProcess,
-            psutil.AccessDenied,
-            AttributeError,
-        ):
-            return 0
-
-    @classmethod
-    def _ler_ram_postgres_agregada(cls) -> int:
-        """Preserva a metrica RAM da F2: todos os processos por nome."""
-        total = 0
-        for processo in psutil.process_iter(["name"]):
-            try:
-                nome = (processo.info["name"] or "").lower()
-            except (psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied):
-                continue
-            if "postgres" in nome:
-                total += cls._ler_ram_postgres(processo)
-        return total
+            memoria = processo.memory_full_info()
+            return int(memoria.uss)
+        except (psutil.NoSuchProcess, psutil.ZombieProcess):
+            return None
+        except psutil.AccessDenied as erro:
+            raise ErroMonitoramentoRecursos(
+                f"Acesso negado ao ler USS de PostgreSQL (PID {processo.pid})."
+            ) from erro
+        except AttributeError as erro:
+            raise ErroMonitoramentoRecursos(
+                "USS nao esta disponivel para um processo PostgreSQL."
+            ) from erro
 
     def _registrar_amostra(self) -> None:
         with self._lock:
@@ -364,21 +363,40 @@ class MonitorRecursos:
                 )
                 else None
             )
-            # A RAM conserva deliberadamente o contrato da F2, inclusive a
-            # agregacao por nome, e e lida depois da CPU para nao alongar o
-            # intervalo encerrado nesta amostra.
-            ram_postgres = self._ler_ram_postgres_agregada()
+            # A RAM usa a mesma arvore da instancia vinculada. Um processo
+            # encerrado durante a leitura invalida a amostra de PostgreSQL;
+            # nunca e convertido em zero.
+            ram_postgres: int | None = 0
+            ram_postgres_incompleta = False
+            for identidade, processo in list(self._processos_postgres.items()):
+                valor = self._ler_ram_postgres(processo)
+                if valor is None:
+                    ram_postgres_incompleta = True
+                    self._processos_postgres.pop(identidade, None)
+                else:
+                    ram_postgres += valor
+            if ram_postgres_incompleta:
+                ram_postgres = None
+            ram_total = (
+                ram_python + ram_postgres
+                if ram_python is not None and ram_postgres is not None
+                else None
+            )
             self._amostras.append(
                 {
                     "duracao_cpu_python": duracao,
                     "duracao_cpu_postgres": duracao_postgres,
                     "duracao_cpu_total": duracao if cpu_total is not None else None,
                     "cpu_python": cpu_python,
-                    "ram_python": float(ram_python),
+                    "ram_python": (
+                        float(ram_python) if ram_python is not None else None
+                    ),
                     "cpu_postgres": cpu_postgres,
-                    "ram_postgres": float(ram_postgres),
+                    "ram_postgres": (
+                        float(ram_postgres) if ram_postgres is not None else None
+                    ),
                     "cpu_total": cpu_total,
-                    "ram_total": float(ram_python + ram_postgres),
+                    "ram_total": float(ram_total) if ram_total is not None else None,
                 }
             )
             self._ultimo_instante = agora
@@ -406,9 +424,15 @@ class MonitorRecursos:
             return sum(valor * duracao for valor, duracao in valores) / tempo
 
         def ram(chave: str, pico: bool = False) -> float:
-            valores = [float(amostra[chave]) for amostra in self._amostras]
+            valores = [
+                float(amostra[chave])
+                for amostra in self._amostras
+                if amostra[chave] is not None
+            ]
             if not valores:
-                raise ErroMonitoramentoRecursos("Nenhuma amostra de RAM foi obtida.")
+                raise ErroMonitoramentoRecursos(
+                    f"Nenhuma leitura valida foi obtida para {chave}."
+                )
             return max(valores) if pico else sum(valores) / len(valores)
 
         mb = 1024 * 1024
