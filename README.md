@@ -284,6 +284,9 @@ Após a certificação, execute a campanha global pelo orquestrador:
 ```powershell
 python src\benchmark.py --run-id oficial_01
 ```
+**Permissões de execução no Windows:** para a coleta de memória USS dos processos PostgreSQL, o benchmark deve ser executado em um terminal PowerShell com privilégios de administrador. Essa condição é necessária para permitir o acesso às informações detalhadas de memória dos processos pelo `psutil`, conforme verificado no ambiente experimental com Windows 11.
+
+Todas as execuções da campanha oficial, incluindo as modalidades de desempenho e recursos, devem utilizar o mesmo nível de privilégios, mantendo uniforme essa condição operacional.
 
 Com os valores padrão, o comando usa:
 
@@ -414,6 +417,7 @@ esse script.
   não são limpas automaticamente.
 - **Dependência Python ausente:** ative o ambiente virtual e execute
   `python -m pip install -r requirements.txt`.
+- **Erro psutil.AccessDenied na coleta de USS:** execute o PowerShell como administrador e verifique se o usuário possui permissão para consultar os processos PostgreSQL.
 
 ## Documentação complementar
 
