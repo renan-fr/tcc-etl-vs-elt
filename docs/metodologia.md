@@ -494,6 +494,19 @@ núcleo lógico, sem normalização pelo número total de CPUs. A soma pode,
 portanto, ultrapassar 100%. A média de CPU é ponderada pela duração dos
 intervalos válidos e o pico é o maior valor observado.
 
+Antes da primeira conexão PostgreSQL, a CPU do Python é efetivamente medida, a
+CPU do PostgreSQL participa com zero por convenção e a CPU agregada é igual à
+CPU Python. Esses intervalos preservam sua duração e participam do cálculo da
+média ponderada.
+
+Depois da primeira vinculação, a CPU agregada é calculada em cada amostra como
+a soma das CPUs Python e PostgreSQL observadas em intervalos temporalmente
+compatíveis. O PostgreSQL permanece participante até o encerramento do pipeline,
+inclusive entre conexões posteriores. Os zeros anteriores à primeira conexão
+são identificados internamente como convencionais e não representam medições
+efetivas iguais a zero; falhas reais de coleta permanecem inválidas e não são
+convertidas em zero.
+
 ### Memória RAM
 
 A métrica de memória será a USS (*Unique Set Size*), obtida homogeneamente para
