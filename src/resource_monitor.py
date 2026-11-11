@@ -302,16 +302,51 @@ class MonitorRecursos:
             ) from erro
 
     @staticmethod
-    def _ler_ram_postgres(processo: psutil.Process) -> int | None:
+    def _ler_ram_postgres(
+        processo: psutil.Process,
+        identidade_esperada: tuple[int, float],
+    ) -> int | None:
         try:
             memoria = processo.memory_full_info()
             return int(memoria.uss)
         except (psutil.NoSuchProcess, psutil.ZombieProcess):
             return None
-        except psutil.AccessDenied as erro:
-            raise ErroMonitoramentoRecursos(
-                f"Acesso negado ao ler USS de PostgreSQL (PID {processo.pid})."
-            ) from erro
+        except psutil.AccessDenied as erro_inicial:
+            try:
+                processo_atual = psutil.Process(processo.pid)
+                identidade_atual = (
+                    processo_atual.pid,
+                    processo_atual.create_time(),
+                )
+            except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                return None
+            except psutil.AccessDenied as erro:
+                raise ErroMonitoramentoRecursos(
+                    "Acesso negado ao revalidar a identidade do processo "
+                    f"PostgreSQL (PID {processo.pid})."
+                ) from erro
+            except Exception as erro:
+                raise ErroMonitoramentoRecursos(
+                    "Falha ao revalidar a identidade do processo PostgreSQL "
+                    f"(PID {processo.pid})."
+                ) from erro
+
+            if identidade_atual != identidade_esperada:
+                return None
+
+            try:
+                memoria = processo_atual.memory_full_info()
+                return int(memoria.uss)
+            except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                return None
+            except psutil.AccessDenied as erro:
+                raise ErroMonitoramentoRecursos(
+                    f"Acesso negado ao ler USS de PostgreSQL (PID {processo.pid})."
+                ) from erro
+            except AttributeError as erro:
+                raise ErroMonitoramentoRecursos(
+                    "USS nao esta disponivel para um processo PostgreSQL."
+                ) from erro
         except AttributeError as erro:
             raise ErroMonitoramentoRecursos(
                 "USS nao esta disponivel para um processo PostgreSQL."
@@ -379,7 +414,7 @@ class MonitorRecursos:
             ram_postgres_incompleta = False
             if self._postgres_vinculado:
                 for identidade, processo in list(self._processos_postgres.items()):
-                    valor = self._ler_ram_postgres(processo)
+                    valor = self._ler_ram_postgres(processo, identidade)
                     if valor is None:
                         ram_postgres_incompleta = True
                         self._processos_postgres.pop(identidade, None)

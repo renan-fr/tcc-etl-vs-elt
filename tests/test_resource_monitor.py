@@ -190,13 +190,163 @@ class MonitorRecursosTest(unittest.TestCase):
 
     def test_acesso_negado_na_uss_postgres_gera_erro_explicito(self) -> None:
         processo = ProcessoFalso(20, uss=psutil.AccessDenied(20))
-        with self.assertRaisesRegex(rm.ErroMonitoramentoRecursos, "Acesso negado"):
-            rm.MonitorRecursos._ler_ram_postgres(processo)
+        atual = ProcessoFalso(20, criado=20.0, uss=psutil.AccessDenied(20))
+        with mock.patch.object(rm.psutil, "Process", return_value=atual):
+            with self.assertRaisesRegex(rm.ErroMonitoramentoRecursos, "Acesso negado"):
+                rm.MonitorRecursos._ler_ram_postgres(processo, (20, 20.0))
 
     def test_uss_postgres_indisponivel_gera_erro_explicito(self) -> None:
         processo = ProcessoFalso(20, uss=AttributeError())
         with self.assertRaisesRegex(rm.ErroMonitoramentoRecursos, "USS"):
-            rm.MonitorRecursos._ler_ram_postgres(processo)
+            rm.MonitorRecursos._ler_ram_postgres(processo, (20, 20.0))
+
+    def test_acesso_negado_seguido_de_desaparecimento_retorna_none(self) -> None:
+        processo = ProcessoFalso(20, uss=psutil.AccessDenied(20))
+        with mock.patch.object(
+            rm.psutil, "Process", side_effect=psutil.NoSuchProcess(20)
+        ):
+            valor = rm.MonitorRecursos._ler_ram_postgres(processo, (20, 20.0))
+
+        self.assertIsNone(valor)
+
+    def test_acesso_negado_com_pid_reutilizado_retorna_none(self) -> None:
+        processo = ProcessoFalso(20, criado=20.0, uss=psutil.AccessDenied(20))
+        reutilizado = ProcessoFalso(20, criado=30.0, uss=999)
+        reutilizado.memory_full_info = mock.Mock(
+            side_effect=AssertionError("nao deve ler USS de PID reutilizado")
+        )
+        with mock.patch.object(rm.psutil, "Process", return_value=reutilizado):
+            valor = rm.MonitorRecursos._ler_ram_postgres(processo, (20, 20.0))
+
+        self.assertIsNone(valor)
+        reutilizado.memory_full_info.assert_not_called()
+
+    def test_acesso_negado_transitorio_aceita_segunda_leitura(self) -> None:
+        processo = ProcessoFalso(20, criado=20.0, uss=psutil.AccessDenied(20))
+        atual = ProcessoFalso(20, criado=20.0, uss=321)
+        with mock.patch.object(rm.psutil, "Process", return_value=atual):
+            valor = rm.MonitorRecursos._ler_ram_postgres(processo, (20, 20.0))
+
+        self.assertEqual(valor, 321)
+
+    def test_acesso_negado_na_revalidacao_permanece_falha(self) -> None:
+        processo = ProcessoFalso(20, uss=psutil.AccessDenied(20))
+        with mock.patch.object(
+            rm.psutil, "Process", side_effect=psutil.AccessDenied(20)
+        ):
+            with self.assertRaisesRegex(
+                rm.ErroMonitoramentoRecursos, "revalidar a identidade"
+            ):
+                rm.MonitorRecursos._ler_ram_postgres(processo, (20, 20.0))
+
+    def test_erro_inesperado_na_revalidacao_permanece_falha(self) -> None:
+        processo = ProcessoFalso(20, uss=psutil.AccessDenied(20))
+        with mock.patch.object(
+            rm.psutil, "Process", side_effect=OSError("falha inesperada")
+        ):
+            with self.assertRaisesRegex(
+                rm.ErroMonitoramentoRecursos, "Falha ao revalidar"
+            ):
+                rm.MonitorRecursos._ler_ram_postgres(processo, (20, 20.0))
+
+    def test_encerramento_entre_cpu_e_uss_invalida_amostra_ram(self) -> None:
+        python = ProcessoFalso(10, nome="python.exe", cpu=[4.0], uss=100)
+        postgres = ProcessoFalso(
+            20, criado=20.0, cpu=[3.0], uss=psutil.AccessDenied(20)
+        )
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos(relogio=mock.Mock(return_value=1.0))
+        monitor._postgres_vinculado = True
+        monitor._raiz_postgres = postgres
+        monitor._identidade_raiz = (20, 20.0)
+        monitor._processos_postgres[(20, 20.0)] = postgres
+        monitor._ultimo_instante = 0.0
+        monitor._ultimo_instante_postgres = 0.0
+
+        with mock.patch.object(
+            rm.psutil, "Process", side_effect=psutil.NoSuchProcess(20)
+        ):
+            monitor._registrar_amostra()
+
+        amostra = monitor._amostras[-1]
+        self.assertEqual(amostra["cpu_postgres"], 3.0)
+        self.assertIsNone(amostra["ram_postgres"])
+        self.assertIsNone(amostra["ram_total"])
+        self.assertNotEqual(amostra["ram_postgres"], 0.0)
+        self.assertNotIn((20, 20.0), monitor._processos_postgres)
+
+    def test_processo_novo_encerrado_antes_da_uss_remove_so_sua_identidade(self) -> None:
+        python = ProcessoFalso(10, nome="python.exe", cpu=[4.0], uss=100)
+        raiz = ProcessoFalso(20, criado=20.0, cpu=[5.0], uss=10)
+        novo = ProcessoFalso(
+            21,
+            criado=21.0,
+            cpu=[0.0],
+            pai=raiz,
+            uss=psutil.AccessDenied(21),
+        )
+        raiz.filhos = [novo]
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos(relogio=mock.Mock(return_value=1.0))
+        monitor._postgres_vinculado = True
+        monitor._raiz_postgres = raiz
+        monitor._identidade_raiz = (20, 20.0)
+        monitor._processos_postgres[(20, 20.0)] = raiz
+        monitor._ultimo_instante = 0.0
+        monitor._ultimo_instante_postgres = 0.0
+
+        with mock.patch.object(
+            rm.psutil, "Process", side_effect=psutil.NoSuchProcess(21)
+        ):
+            monitor._registrar_amostra()
+
+        amostra = monitor._amostras[-1]
+        self.assertEqual(novo.chamadas_cpu, [None])
+        self.assertIn((20, 20.0), monitor._processos_postgres)
+        self.assertNotIn((21, 21.0), monitor._processos_postgres)
+        self.assertIsNone(amostra["ram_postgres"])
+        self.assertIsNone(amostra["ram_total"])
+
+    def test_encerramento_na_amostra_final_nao_contabiliza_zero(self) -> None:
+        python = ProcessoFalso(10, nome="python.exe", cpu=[4.0], uss=100)
+        postgres = ProcessoFalso(
+            20, criado=20.0, cpu=[3.0], uss=psutil.AccessDenied(20)
+        )
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos(relogio=mock.Mock(return_value=1.0))
+        monitor._postgres_vinculado = True
+        monitor._raiz_postgres = postgres
+        monitor._identidade_raiz = (20, 20.0)
+        monitor._processos_postgres[(20, 20.0)] = postgres
+        monitor._ultimo_instante = 0.0
+        monitor._ultimo_instante_postgres = 0.0
+        monitor._amostras = [
+            {
+                "duracao_cpu_python": 1.0,
+                "duracao_cpu_postgres": 1.0,
+                "duracao_cpu_total": 1.0,
+                "cpu_python": 2.0,
+                "cpu_postgres": 3.0,
+                "cpu_postgres_convencional": False,
+                "cpu_total": 5.0,
+                "ram_python": 100.0,
+                "ram_postgres": 200.0,
+                "ram_total": 300.0,
+            }
+        ]
+        rm._monitor_ativo = monitor
+
+        with mock.patch.object(
+            rm.psutil, "Process", side_effect=psutil.NoSuchProcess(20)
+        ):
+            resultado = monitor.parar()
+
+        self.assertIsNone(monitor._amostras[-1]["ram_postgres"])
+        self.assertIsNone(monitor._amostras[-1]["ram_total"])
+        self.assertAlmostEqual(resultado["ram_media_postgres_mb"], 200 / 1024**2)
+        self.assertAlmostEqual(resultado["ram_media_total_mb"], 300 / 1024**2)
+        self.assertEqual(monitor._processos_postgres, {})
+        self.assertIsNone(rm._monitor_ativo)
 
     def test_pid_reutilizado_nao_reaproveita_processo_antigo(self) -> None:
         python = ProcessoFalso(10, nome="python.exe", cpu=[0.0, 1.0])
