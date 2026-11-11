@@ -72,7 +72,7 @@ class MonitorRecursos:
         self._processo_python = psutil.Process()
         self._parar = threading.Event()
         self._thread: threading.Thread | None = None
-        self._amostras: list[dict[str, float | None]] = []
+        self._amostras: list[dict[str, float | bool | None]] = []
         self._processos_postgres: dict[tuple[int, float], psutil.Process] = {}
         self._raiz_postgres: psutil.Process | None = None
         self._identidade_raiz: tuple[int, float] | None = None
@@ -331,27 +331,32 @@ class MonitorRecursos:
             cpu_python = self._ler_cpu(self._processo_python, "Python")
             ram_python = self._ler_ram_python(self._processo_python)
 
-            cpu_postgres_validas: list[float] = []
-            encerrados: list[tuple[int, float]] = []
-            for identidade, processo in list(self._processos_postgres.items()):
-                if identidade in novos:
-                    continue
-                valor = self._ler_cpu(processo, "PostgreSQL")
-                if valor is None:
-                    encerrados.append(identidade)
-                else:
-                    cpu_postgres_validas.append(valor)
-            for identidade in encerrados:
-                self._processos_postgres.pop(identidade, None)
+            cpu_postgres_convencional = not self._postgres_vinculado
+            if cpu_postgres_convencional:
+                cpu_postgres = 0.0
+                duracao_postgres = duracao
+            else:
+                cpu_postgres_validas: list[float] = []
+                encerrados: list[tuple[int, float]] = []
+                for identidade, processo in list(self._processos_postgres.items()):
+                    if identidade in novos:
+                        continue
+                    valor = self._ler_cpu(processo, "PostgreSQL")
+                    if valor is None:
+                        encerrados.append(identidade)
+                    else:
+                        cpu_postgres_validas.append(valor)
+                for identidade in encerrados:
+                    self._processos_postgres.pop(identidade, None)
 
-            cpu_postgres = (
-                sum(cpu_postgres_validas) if cpu_postgres_validas else None
-            )
-            duracao_postgres = (
-                agora - self._ultimo_instante_postgres
-                if self._ultimo_instante_postgres is not None
-                else None
-            )
+                cpu_postgres = (
+                    sum(cpu_postgres_validas) if cpu_postgres_validas else None
+                )
+                duracao_postgres = (
+                    agora - self._ultimo_instante_postgres
+                    if self._ultimo_instante_postgres is not None
+                    else None
+                )
             intervalos_compativeis = (
                 duracao_postgres is not None
                 and abs(duracao - duracao_postgres) <= 1e-9
@@ -397,6 +402,7 @@ class MonitorRecursos:
                         float(ram_python) if ram_python is not None else None
                     ),
                     "cpu_postgres": cpu_postgres,
+                    "cpu_postgres_convencional": cpu_postgres_convencional,
                     "ram_postgres": (
                         float(ram_postgres) if ram_postgres is not None else None
                     ),
@@ -411,6 +417,14 @@ class MonitorRecursos:
     def _consolidar(self) -> dict[str, float]:
         def cpu(chave: str, pico: bool = False) -> float:
             chave_duracao = f"duracao_{chave}"
+            if chave in {"cpu_postgres", "cpu_total"} and not any(
+                amostra[chave] is not None
+                and not amostra.get("cpu_postgres_convencional", False)
+                for amostra in self._amostras
+            ):
+                raise ErroMonitoramentoRecursos(
+                    f"Nenhuma leitura valida foi obtida para {chave}."
+                )
             valores = [
                 (float(amostra[chave]), float(amostra[chave_duracao]))
                 for amostra in self._amostras
