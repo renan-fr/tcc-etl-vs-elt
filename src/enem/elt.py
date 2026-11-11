@@ -7,17 +7,42 @@ from datetime import datetime
 from io import StringIO
 import os
 from pathlib import Path
-import threading
+import sys
 import time
 from typing import Iterator
 
 import psycopg2
-import psutil
+try:
+    from src.benchmark_paths import (
+        diretorio_modalidade_obrigatorio,
+        validar_execucao_inedita,
+    )
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from benchmark_paths import (
+        diretorio_modalidade_obrigatorio,
+        validar_execucao_inedita,
+    )
 from psycopg2 import sql
 from dotenv import load_dotenv
 
+try:
+    from src.resource_monitor import MonitorRecursos, vincular_conexao_postgres
+except ModuleNotFoundError:
+    from resource_monitor import MonitorRecursos, vincular_conexao_postgres
+try:
+    from src.benchmark_output import imprimir_resultado_benchmark
+except ModuleNotFoundError:
+    from benchmark_output import imprimir_resultado_benchmark
+
 
 BASE_DIR = Path(__file__).resolve().parents[2]
+CAMPOS_RECURSOS = (
+    "cpu_media_python", "cpu_pico_python", "ram_media_python_mb",
+    "ram_pico_python_mb", "cpu_media_postgres", "cpu_pico_postgres",
+    "ram_media_postgres_mb", "ram_pico_postgres_mb", "cpu_media_total",
+    "cpu_pico_total", "ram_media_total_mb", "ram_pico_total_mb",
+)
 PASTA_ENEM = BASE_DIR / "data" / "raw" / "enem" / "microdados_enem_2024" / "DADOS"
 CAMINHO_PARTICIPANTES = PASTA_ENEM / "PARTICIPANTES_2024.csv"
 CAMINHO_RESULTADOS = PASTA_ENEM / "RESULTADOS_2024.csv"
@@ -156,23 +181,26 @@ class ResultadoBenchmark:
     volume_configurado: int | None
     arquitetura: str
     rodada: int | None
+    modalidade: str
+    monitoramento_ativo: bool
+    intervalo_monitoramento_s: float | None
     tempo_leitura: float
     tempo_transformacao: float
     tempo_carga: float
     tempo_total: float
     throughput: float
-    cpu_media_python: float
-    cpu_pico_python: float
-    ram_media_python_mb: float
-    ram_pico_python_mb: float
-    cpu_media_postgres: float
-    cpu_pico_postgres: float
-    ram_media_postgres_mb: float
-    ram_pico_postgres_mb: float
-    cpu_media_total: float
-    cpu_pico_total: float
-    ram_media_total_mb: float
-    ram_pico_total_mb: float
+    cpu_media_python: float | None
+    cpu_pico_python: float | None
+    ram_media_python_mb: float | None
+    ram_pico_python_mb: float | None
+    cpu_media_postgres: float | None
+    cpu_pico_postgres: float | None
+    ram_media_postgres_mb: float | None
+    ram_pico_postgres_mb: float | None
+    cpu_media_total: float | None
+    cpu_pico_total: float | None
+    ram_media_total_mb: float | None
+    ram_pico_total_mb: float | None
     quantidade_registros: int
     linhas_participantes: int
     linhas_resultados: int
@@ -190,105 +218,30 @@ class ResultadoValidacao:
         return not self.erros
 
 
-class MonitorRecursos:
-    def __init__(self, intervalo_segundos: float = 0.5) -> None:
-        self._processo_python = psutil.Process()
-        self._intervalo = intervalo_segundos
-        self._parar = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._amostras: list[dict[str, float]] = []
-
-    def iniciar(self) -> None:
-        self._parar.clear()
-        self._processo_python.cpu_percent(interval=None)
-        self._thread = threading.Thread(target=self._coletar, daemon=True)
-        self._thread.start()
-
-    def parar(self) -> dict[str, float]:
-        self._parar.set()
-        if self._thread:
-            self._thread.join()
-        self._registrar_amostra()
-        chaves = ("cpu_python", "ram_python", "cpu_postgres", "ram_postgres", "cpu_total", "ram_total")
-        if not self._amostras:
-            valores = {chave: [0.0] for chave in chaves}
-        else:
-            valores = {chave: [amostra[chave] for amostra in self._amostras] for chave in chaves}
-        return {
-            "cpu_media_python": sum(valores["cpu_python"]) / len(valores["cpu_python"]),
-            "cpu_pico_python": max(valores["cpu_python"]),
-            "ram_media_python_mb": sum(valores["ram_python"]) / len(valores["ram_python"]) / (1024 * 1024),
-            "ram_pico_python_mb": max(valores["ram_python"]) / (1024 * 1024),
-            "cpu_media_postgres": sum(valores["cpu_postgres"]) / len(valores["cpu_postgres"]),
-            "cpu_pico_postgres": max(valores["cpu_postgres"]),
-            "ram_media_postgres_mb": sum(valores["ram_postgres"]) / len(valores["ram_postgres"]) / (1024 * 1024),
-            "ram_pico_postgres_mb": max(valores["ram_postgres"]) / (1024 * 1024),
-            "cpu_media_total": sum(valores["cpu_total"]) / len(valores["cpu_total"]),
-            "cpu_pico_total": max(valores["cpu_total"]),
-            "ram_media_total_mb": sum(valores["ram_total"]) / len(valores["ram_total"]) / (1024 * 1024),
-            "ram_pico_total_mb": max(valores["ram_total"]) / (1024 * 1024),
-        }
-
-    def _coletar(self) -> None:
-        while not self._parar.wait(self._intervalo):
-            self._registrar_amostra()
-
-    def _registrar_amostra(self) -> None:
-        processos = []
-        for processo in psutil.process_iter(["name"]):
-            try:
-                if "postgres" in (processo.info["name"] or "").lower():
-                    processos.append(processo)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-        cpu_python = _cpu(self._processo_python)
-        ram_python = _ram(self._processo_python)
-        cpu_postgres = sum(_cpu(processo) for processo in processos)
-        ram_postgres = sum(_memoria_privada(processo) for processo in processos)
-        self._amostras.append({
-            "cpu_python": cpu_python,
-            "ram_python": float(ram_python),
-            "cpu_postgres": cpu_postgres,
-            "ram_postgres": float(ram_postgres),
-            "cpu_total": cpu_python + cpu_postgres,
-            "ram_total": float(ram_python + ram_postgres),
-        })
-
-
-def _cpu(processo: psutil.Process) -> float:
-    try:
-        return processo.cpu_percent(interval=None)
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        return 0.0
-
-
-def _ram(processo: psutil.Process) -> int:
-    try:
-        return processo.memory_info().rss
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        return 0
-
-
-def _memoria_privada(processo: psutil.Process) -> int:
-    try:
-        memoria = processo.memory_info()
-        if hasattr(memoria, "private"):
-            return memoria.private
-        return processo.memory_full_info().uss
-    except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
-        return 0
+def _iniciar_monitoramento(
+    benchmark: bool,
+    monitorar_recursos: bool,
+) -> MonitorRecursos | None:
+    if not benchmark or not monitorar_recursos:
+        return None
+    monitor = MonitorRecursos(intervalo_segundos=0.5)
+    monitor.iniciar()
+    return monitor
 
 
 def obter_conexao(database_url: str | None = None):
     if database_url:
-        return psycopg2.connect(database_url)
-    return psycopg2.connect(
-        host=os.getenv("POSTGRES_HOST", "localhost"),
-        port=int(os.getenv("POSTGRES_PORT", "5432")),
-        dbname=os.getenv("POSTGRES_DB"),
-        user=os.getenv("POSTGRES_USER"),
-        password=os.getenv("POSTGRES_PASSWORD"),
-    )
+        conexao = psycopg2.connect(database_url)
+    else:
+        conexao = psycopg2.connect(
+            host=os.getenv("POSTGRES_HOST", "localhost"),
+            port=int(os.getenv("POSTGRES_PORT", "5432")),
+            dbname=os.getenv("POSTGRES_DB"),
+            user=os.getenv("POSTGRES_USER"),
+            password=os.getenv("POSTGRES_PASSWORD"),
+        )
+    vincular_conexao_postgres(conexao)
+    return conexao
 
 
 def criar_tabela_raw(cursor, schema: str, tabela: str, colunas: list[str]) -> None:
@@ -966,9 +919,6 @@ def executar_elt(
                     raise ValueError(
                         "Pipeline interrompido por erros críticos de validação."
                     )
-            else:
-                print("Validação interna ignorada no modo de desempenho.")
-
             linhas_participantes = linhas_raw_participantes
             linhas_resultados = linhas_raw_resultados
 
@@ -997,6 +947,7 @@ def salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
             casas = 3 if campo.startswith("tempo_") else 2
             valor = str(round(valor, casas)).replace(".", ",")
         linha[campo] = valor
+    validar_execucao_inedita(caminho, linha)
     with caminho.open("a", newline="", encoding="utf-8") as arquivo:
         escritor = csv.DictWriter(arquivo, fieldnames=campos, delimiter=";")
         if not existe:
@@ -1005,19 +956,26 @@ def salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
 
 
 def finalizar_benchmark(
-    monitor,
-    inicio_total,
+    monitor: MonitorRecursos | None,
     tempos,
     limite,
     rodada,
     caminho_csv: Path | None,
+    modalidade: str,
 ) -> None:
-    recursos = monitor.parar()
+    tempo_total = tempos.total
+    recursos = (
+        monitor.parar()
+        if monitor is not None
+        else {campo: None for campo in CAMPOS_RECURSOS}
+    )
     quantidade = tempos.linhas_participantes + tempos.linhas_resultados
-    tempo_total = time.perf_counter() - inicio_total
     resultado = ResultadoBenchmark(
         dataset="enem", volume_configurado=limite, arquitetura="elt",
-        rodada=rodada, tempo_leitura=tempos.leitura,
+        rodada=rodada, modalidade=modalidade,
+        monitoramento_ativo=monitor is not None,
+        intervalo_monitoramento_s=0.5 if monitor is not None else None,
+        tempo_leitura=tempos.leitura,
         tempo_transformacao=tempos.transformacao_sql,
         tempo_carga=tempos.carga_raw, tempo_total=tempo_total,
         throughput=quantidade / tempo_total if tempo_total else 0.0,
@@ -1025,6 +983,7 @@ def finalizar_benchmark(
         linhas_resultados=tempos.linhas_resultados,
         timestamp=datetime.now().isoformat(timespec="seconds"), **recursos,
     )
+    imprimir_resultado_benchmark(resultado)
     if caminho_csv:
         salvar_benchmark(resultado, caminho_csv)
         print(f"Resultado do benchmark salvo em: {caminho_csv}")
@@ -1040,6 +999,7 @@ def main() -> None:
         required=True,
     )
     parser.add_argument("--rodada", type=int)
+    parser.add_argument("--sem-monitoramento", action="store_true")
     args = parser.parse_args()
     if args.limite < 1:
         parser.error("--limite deve ser maior que zero.")
@@ -1049,10 +1009,8 @@ def main() -> None:
         parser.error("--rodada só pode ser usada no modo medir.")
 
     benchmark = args.modo != "certificar"
-    inicio_total = time.perf_counter()
-    monitor = MonitorRecursos()
-    if benchmark:
-        monitor.iniciar()
+    modalidade = "desempenho" if args.sem_monitoramento else "recursos"
+    monitor = _iniciar_monitoramento(benchmark, not args.sem_monitoramento)
     try:
         tempos = executar_elt(
             os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL"),
@@ -1062,9 +1020,11 @@ def main() -> None:
             validar=args.modo == "certificar",
         )
     except (psycopg2.Error, UnicodeError, ValueError) as erro:
-        if benchmark:
+        if monitor is not None:
             monitor.parar()
         raise SystemExit(f"Falha no pipeline ELT do ENEM: {erro}") from erro
+    if tempos.validacao is None:
+        print("Validação interna ignorada no modo de desempenho.")
     print(f"Leitura/preparacao: {tempos.leitura:.3f}s")
     print(f"Carga RAW: {tempos.carga_raw:.3f}s")
     print(f"Transformação SQL: {tempos.transformacao_sql:.3f}s")
@@ -1075,22 +1035,16 @@ def main() -> None:
     print(f"Total: {tempos.total:.3f}s")
     if benchmark:
         caminho_csv = (
-            BASE_DIR
-            / "data"
-            / "benchmark"
-            / "enem"
-            / "resultados"
-            / "enem_elt.csv"
-            if args.modo == "medir"
-            else None
+            diretorio_modalidade_obrigatorio(modalidade) / "enem_elt.csv"
+            if args.modo == "medir" else None
         )
         finalizar_benchmark(
             monitor,
-            inicio_total,
             tempos,
             args.limite,
             args.rodada,
             caminho_csv,
+            modalidade,
         )
 
 

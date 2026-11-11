@@ -1,12 +1,27 @@
 # Dados brutos
 data/raw/*
-!data/raw/.gitkeep
-# data/benchmark/
+!data/raw/enem/
+data/raw/enem/*
+!data/raw/tse/
+data/raw/tse/*
+!data/raw/enem/.gitkeep
+!data/raw/tse/.gitkeep
+# Campanhas e resultados de benchmark (os manifestos TSE continuam versionados)
+data/benchmark/campanhas/*
+data/benchmark/campanha.json
+data/benchmark/enem/resultados/*
+data/benchmark/tse/resultados/*
+data/benchmark/tse/experimental_cte/*
+data/benchmark/tse/experimental_cte/planos/*
+graficos/figuras/*
 
 # Resultados gerados
 results/*.csv
 results/graficos/*
 !results/graficos/.gitkeep
+
+# Artefatos locais de experimentos
+data/experimentos/
 
 # Ambiente Python
 .venv/

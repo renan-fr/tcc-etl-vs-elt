@@ -350,8 +350,15 @@ consistencia entre UF e regiao, nao serao reutilizadas no TSE.
 Os resultados futuros do TSE deverao ser gravados em:
 
 ```text
-data/benchmark/tse/resultados/
+data/benchmark/campanhas/<run_id>/desempenho/tse_etl.csv
+data/benchmark/campanhas/<run_id>/desempenho/tse_elt.csv
+data/benchmark/campanhas/<run_id>/recursos/tse_etl.csv
+data/benchmark/campanhas/<run_id>/recursos/tse_elt.csv
 ```
+
+Tempos e throughput oficiais vem de `desempenho`, sem monitor. CPU e RAM
+oficiais vem de `recursos`, monitorado a cada 0,5 segundo; seus tempos sao
+mantidos somente para diagnostico.
 
 ## Schemas e tabelas fisicas
 

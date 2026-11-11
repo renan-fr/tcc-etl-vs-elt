@@ -6,19 +6,51 @@ from io import StringIO
 import os
 from pathlib import Path
 import argparse
-import threading
+import sys
 import time
 from typing import Any
 
 import pandas as pd
-import psutil
+
+try:
+    from src.benchmark_paths import (
+        diretorio_modalidade_obrigatorio,
+        validar_execucao_inedita,
+    )
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from benchmark_paths import (
+        diretorio_modalidade_obrigatorio,
+        validar_execucao_inedita,
+    )
 import psycopg2
 from psycopg2 import sql
 from dotenv import load_dotenv
 
+try:
+    from src.resource_monitor import MonitorRecursos, vincular_conexao_postgres
+except ModuleNotFoundError:
+    from resource_monitor import MonitorRecursos, vincular_conexao_postgres
+try:
+    from src.benchmark_output import (
+        imprimir_resultado_benchmark,
+        linhas_resultado_benchmark as _linhas_resumo_benchmark,
+    )
+except ModuleNotFoundError:
+    from benchmark_output import (
+        imprimir_resultado_benchmark,
+        linhas_resultado_benchmark as _linhas_resumo_benchmark,
+    )
+
 
 VALORES_DESCONHECIDOS: list[dict[str, object]] = []
 VALOR_NAO_INFORMADO = "Não informado"
+CAMPOS_RECURSOS = (
+    "cpu_media_python", "cpu_pico_python", "ram_media_python_mb",
+    "ram_pico_python_mb", "cpu_media_postgres", "cpu_pico_postgres",
+    "ram_media_postgres_mb", "ram_pico_postgres_mb", "cpu_media_total",
+    "cpu_pico_total", "ram_media_total_mb", "ram_pico_total_mb",
+)
 
 
 @dataclass(frozen=True)
@@ -38,23 +70,26 @@ class ResultadoBenchmark:
     volume_configurado: int | None
     arquitetura: str
     rodada: int | None
+    modalidade: str
+    monitoramento_ativo: bool
+    intervalo_monitoramento_s: float | None
     tempo_leitura: float
     tempo_transformacao: float
     tempo_carga: float
     tempo_total: float
     throughput: float
-    cpu_media_python: float
-    cpu_pico_python: float
-    ram_media_python_mb: float
-    ram_pico_python_mb: float
-    cpu_media_postgres: float
-    cpu_pico_postgres: float
-    ram_media_postgres_mb: float
-    ram_pico_postgres_mb: float
-    cpu_media_total: float
-    cpu_pico_total: float
-    ram_media_total_mb: float
-    ram_pico_total_mb: float
+    cpu_media_python: float | None
+    cpu_pico_python: float | None
+    ram_media_python_mb: float | None
+    ram_pico_python_mb: float | None
+    cpu_media_postgres: float | None
+    cpu_pico_postgres: float | None
+    ram_media_postgres_mb: float | None
+    ram_pico_postgres_mb: float | None
+    cpu_media_total: float | None
+    cpu_pico_total: float | None
+    ram_media_total_mb: float | None
+    ram_pico_total_mb: float | None
     quantidade_registros: int
     linhas_participantes: int
     linhas_resultados: int
@@ -815,8 +850,11 @@ def obter_conexao_postgres(database_url: str | None = None) -> ConexaoPostgres:
 
 def _conectar_postgres(conexao_postgres: ConexaoPostgres):
     if isinstance(conexao_postgres, str):
-        return psycopg2.connect(conexao_postgres)
-    return psycopg2.connect(**conexao_postgres)
+        conexao = psycopg2.connect(conexao_postgres)
+    else:
+        conexao = psycopg2.connect(**conexao_postgres)
+    vincular_conexao_postgres(conexao)
+    return conexao
 
 
 def _criar_tabela(
@@ -970,141 +1008,15 @@ def _imprimir_validacao(resultado: ResultadoValidacao) -> None:
         print("  Alertas: nenhum")
 
 
-class MonitorRecursos:
-    def __init__(self, intervalo_segundos: float = 0.5) -> None:
-        self.intervalo_segundos = intervalo_segundos
-        self._processo_python = psutil.Process()
-        self._parar = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._amostras: list[dict[str, float]] = []
-
-    def iniciar(self) -> None:
-        self._parar.clear()
-        self._processo_python.cpu_percent(interval=None)
-        self._thread = threading.Thread(target=self._coletar, daemon=True)
-        self._thread.start()
-
-    def parar(self) -> dict[str, float]:
-        self._parar.set()
-        if self._thread:
-            self._thread.join()
-        self._registrar_amostra()
-        return self._consolidar()
-
-    def _coletar(self) -> None:
-        while not self._parar.wait(self.intervalo_segundos):
-            self._registrar_amostra()
-
-    def _registrar_amostra(self) -> None:
-        processos_postgres = _obter_processos_postgres()
-
-        cpu_python = _cpu_percentual(self._processo_python)
-        ram_python = _memoria_rss(self._processo_python)
-        cpu_postgres = sum(_cpu_percentual(p) for p in processos_postgres)
-        ram_postgres = sum(_memoria_privada(p) for p in processos_postgres)
-
-        self._amostras.append(
-            {
-                "cpu_python": cpu_python,
-                "ram_python": float(ram_python),
-                "cpu_postgres": cpu_postgres,
-                "ram_postgres": float(ram_postgres),
-                "cpu_total": cpu_python + cpu_postgres,
-                "ram_total": float(ram_python + ram_postgres),
-            }
-        )
-
-    def _consolidar(self) -> dict[str, float]:
-        if not self._amostras:
-            return {
-                "cpu_media_python": 0.0,
-                "cpu_pico_python": 0.0,
-                "ram_media_python_mb": 0.0,
-                "ram_pico_python_mb": 0.0,
-                "cpu_media_postgres": 0.0,
-                "cpu_pico_postgres": 0.0,
-                "ram_media_postgres_mb": 0.0,
-                "ram_pico_postgres_mb": 0.0,
-                "cpu_media_total": 0.0,
-                "cpu_pico_total": 0.0,
-                "ram_media_total_mb": 0.0,
-                "ram_pico_total_mb": 0.0,
-            }
-
-        return {
-            "cpu_media_python": _media("cpu_python", self._amostras),
-            "cpu_pico_python": _maximo("cpu_python", self._amostras),
-            "ram_media_python_mb": _bytes_para_mb(
-                _media("ram_python", self._amostras)
-            ),
-            "ram_pico_python_mb": _bytes_para_mb(
-                _maximo("ram_python", self._amostras)
-            ),
-            "cpu_media_postgres": _media("cpu_postgres", self._amostras),
-            "cpu_pico_postgres": _maximo("cpu_postgres", self._amostras),
-            "ram_media_postgres_mb": _bytes_para_mb(
-                _media("ram_postgres", self._amostras)
-            ),
-            "ram_pico_postgres_mb": _bytes_para_mb(
-                _maximo("ram_postgres", self._amostras)
-            ),
-            "cpu_media_total": _media("cpu_total", self._amostras),
-            "cpu_pico_total": _maximo("cpu_total", self._amostras),
-            "ram_media_total_mb": _bytes_para_mb(
-                _media("ram_total", self._amostras)
-            ),
-            "ram_pico_total_mb": _bytes_para_mb(
-                _maximo("ram_total", self._amostras)
-            ),
-        }
-
-
-def _obter_processos_postgres() -> list[psutil.Process]:
-    processos = []
-    for processo in psutil.process_iter(["name"]):
-        try:
-            nome = (processo.info["name"] or "").lower()
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-        if "postgres" in nome:
-            processos.append(processo)
-    return processos
-
-
-def _cpu_percentual(processo: psutil.Process) -> float:
-    try:
-        return processo.cpu_percent(interval=None)
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        return 0.0
-
-
-def _memoria_rss(processo: psutil.Process) -> int:
-    try:
-        return processo.memory_info().rss
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        return 0
-
-
-def _memoria_privada(processo: psutil.Process) -> int:
-    try:
-        memoria = processo.memory_info()
-        if hasattr(memoria, "private"):
-            return memoria.private
-        return processo.memory_full_info().uss
-    except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
-        return 0
-
-
-def _media(chave: str, amostras: list[dict[str, float]]) -> float:
-    return sum(amostra[chave] for amostra in amostras) / len(amostras)
-
-
-def _maximo(chave: str, amostras: list[dict[str, float]]) -> float:
-    return max(amostra[chave] for amostra in amostras)
-
-
-def _bytes_para_mb(valor: float) -> float:
-    return valor / (1024 * 1024)
+def _iniciar_monitoramento(
+    benchmark: bool,
+    monitorar_recursos: bool,
+) -> MonitorRecursos | None:
+    if not benchmark or not monitorar_recursos:
+        return None
+    monitor = MonitorRecursos(intervalo_segundos=0.5)
+    monitor.iniciar()
+    return monitor
 
 
 def _salvar_resultado_benchmark(
@@ -1127,6 +1039,7 @@ def _salvar_resultado_benchmark(
             casas = 3 if campo.startswith("tempo_") else 2
             valor = round(valor, casas)
         linha_formatada[campo] = valor
+    validar_execucao_inedita(caminho, linha_formatada)
     linha = pd.DataFrame([linha_formatada])
     linha.to_csv(
         caminho,
@@ -1139,37 +1052,10 @@ def _salvar_resultado_benchmark(
     )
 
 
-def _linhas_resumo_benchmark(resultado: ResultadoBenchmark) -> list[str]:
-    volume = resultado.volume_configurado
-    volume_formatado = "todos" if volume is None else str(volume)
-
-    return [
-        "Benchmark ETL ENEM:",
-        f"Volume configurado: {volume_formatado}",
-        f"Quantidade registros: {resultado.quantidade_registros}",
-        f"Linhas participantes: {resultado.linhas_participantes}",
-        f"Linhas resultados: {resultado.linhas_resultados}",
-        f"Tempo leitura: {resultado.tempo_leitura:.3f}s",
-        f"Tempo transformacao: {resultado.tempo_transformacao:.3f}s",
-        f"Tempo carga: {resultado.tempo_carga:.3f}s",
-        f"Tempo total: {resultado.tempo_total:.3f}s",
-        f"Throughput: {resultado.throughput:.2f} registros/s",
-        f"CPU media total: {resultado.cpu_media_total:.2f}%",
-        f"CPU pico total: {resultado.cpu_pico_total:.2f}%",
-        f"RAM media total: {resultado.ram_media_total_mb:.2f} MB",
-        f"RAM pico total: {resultado.ram_pico_total_mb:.2f} MB",
-    ]
-
-
-def _imprimir_resultado_benchmark(resultado: ResultadoBenchmark) -> None:
-    for linha in _linhas_resumo_benchmark(resultado):
-        print(linha)
-
-
 def _finalizar_benchmark(
     benchmark: bool,
-    monitor: MonitorRecursos,
-    inicio_total: float,
+    monitor: MonitorRecursos | None,
+    tempo_total: float,
     tempo_leitura: float,
     tempo_transformacao: float,
     tempo_carga: float,
@@ -1178,12 +1064,16 @@ def _finalizar_benchmark(
     linhas_resultados: int,
     rodada: int | None,
     benchmark_output: Path | None,
+    modalidade: str,
 ) -> None:
     if not benchmark:
         return
 
-    tempo_total = time.perf_counter() - inicio_total
-    recursos = monitor.parar()
+    recursos = (
+        monitor.parar()
+        if monitor is not None
+        else {campo: None for campo in CAMPOS_RECURSOS}
+    )
     quantidade_registros = linhas_participantes + linhas_resultados
     throughput = quantidade_registros / tempo_total if tempo_total else 0.0
 
@@ -1192,6 +1082,9 @@ def _finalizar_benchmark(
         volume_configurado=limite,
         arquitetura="etl",
         rodada=rodada,
+        modalidade=modalidade,
+        monitoramento_ativo=monitor is not None,
+        intervalo_monitoramento_s=0.5 if monitor is not None else None,
         tempo_leitura=tempo_leitura,
         tempo_transformacao=tempo_transformacao,
         tempo_carga=tempo_carga,
@@ -1204,7 +1097,7 @@ def _finalizar_benchmark(
         **recursos,
     )
 
-    _imprimir_resultado_benchmark(resultado)
+    imprimir_resultado_benchmark(resultado)
     if benchmark_output:
         _salvar_resultado_benchmark(resultado, benchmark_output)
         print(f"Resultado do benchmark salvo em: {benchmark_output}")
@@ -1219,13 +1112,12 @@ def main(
     benchmark_output: Path | None = None,
     rodada: int | None = None,
     validar: bool = True,
+    monitorar_recursos: bool = True,
+    modalidade: str = "recursos",
 ) -> None:
-    inicio_total = time.perf_counter()
-    monitor = MonitorRecursos()
-    if benchmark:
-        monitor.iniciar()
-
     limpar_relatorio_valores_desconhecidos()
+    monitor = _iniciar_monitoramento(benchmark, monitorar_recursos)
+    inicio_total = time.perf_counter()
 
     inicio = time.perf_counter()
     participantes = extrair_participantes(limite)
@@ -1236,16 +1128,6 @@ def main(
     participantes_tratados = transformar_participantes(participantes)
     resultados_tratados = transformar_resultados(resultados)
     tempo_transformacao = time.perf_counter() - inicio
-
-    print("Participantes:", participantes_tratados.shape)
-    print("Resultados:", resultados_tratados.shape)
-
-    desconhecidos = relatorio_valores_desconhecidos()
-    if desconhecidos.empty:
-        print("Valores desconhecidos: nenhum")
-    else:
-        print("Valores desconhecidos:")
-        print(desconhecidos.to_string(index=False))
 
     tempo_validacao: float | None = None
     if validar:
@@ -1265,16 +1147,13 @@ def main(
 
         erros = validacao_participantes.erros + validacao_resultados.erros
         if erros:
-            if benchmark:
+            if monitor is not None:
                 monitor.parar()
             raise SystemExit("Carga interrompida por erros críticos de validação.")
-    else:
-        print("Validação interna ignorada no modo de desempenho.")
-
     try:
         conexao_postgres = obter_conexao_postgres(database_url)
     except ValueError as erro:
-        if benchmark:
+        if monitor is not None:
             monitor.parar()
         raise SystemExit(str(erro)) from erro
 
@@ -1287,6 +1166,19 @@ def main(
         if_exists=if_exists,
     )
     tempo_carga = time.perf_counter() - inicio
+    tempo_total = time.perf_counter() - inicio_total
+
+    print("Participantes:", participantes_tratados.shape)
+    print("Resultados:", resultados_tratados.shape)
+
+    desconhecidos = relatorio_valores_desconhecidos()
+    if desconhecidos.empty:
+        print("Valores desconhecidos: nenhum")
+    else:
+        print("Valores desconhecidos:")
+        print(desconhecidos.to_string(index=False))
+    if not validar:
+        print("Validação interna ignorada no modo de desempenho.")
 
     print(
         "Carga concluída: "
@@ -1296,7 +1188,7 @@ def main(
     _finalizar_benchmark(
         benchmark=benchmark,
         monitor=monitor,
-        inicio_total=inicio_total,
+        tempo_total=tempo_total,
         tempo_leitura=tempo_leitura,
         tempo_transformacao=tempo_transformacao,
         tempo_carga=tempo_carga,
@@ -1305,6 +1197,7 @@ def main(
         linhas_resultados=len(resultados),
         rodada=rodada,
         benchmark_output=benchmark_output,
+        modalidade=modalidade,
     )
 
 
@@ -1322,6 +1215,7 @@ if __name__ == "__main__":
         required=True,
     )
     parser.add_argument("--rodada", type=int)
+    parser.add_argument("--sem-monitoramento", action="store_true")
 
     args = parser.parse_args()
 
@@ -1333,10 +1227,10 @@ if __name__ == "__main__":
         parser.error("--rodada só pode ser usada no modo medir.")
 
     benchmark = args.modo != "certificar"
+    modalidade = "desempenho" if args.sem_monitoramento else "recursos"
     benchmark_output = (
-        BASE_DIR / "data" / "benchmark" / "enem" / "resultados" / "enem_etl.csv"
-        if args.modo == "medir"
-        else None
+        diretorio_modalidade_obrigatorio(modalidade) / "enem_etl.csv"
+        if args.modo == "medir" else None
     )
 
     main(
@@ -1348,4 +1242,6 @@ if __name__ == "__main__":
         benchmark_output=benchmark_output,
         rodada=args.rodada,
         validar=args.modo == "certificar",
+        monitorar_recursos=not args.sem_monitoramento,
+        modalidade=modalidade,
     )

@@ -234,8 +234,15 @@ Serão alertas:
 Os resultados do ENEM serão gravados em:
 
 ```text
-data/benchmark/enem/resultados/
+data/benchmark/campanhas/<run_id>/desempenho/enem_etl.csv
+data/benchmark/campanhas/<run_id>/desempenho/enem_elt.csv
+data/benchmark/campanhas/<run_id>/recursos/enem_etl.csv
+data/benchmark/campanhas/<run_id>/recursos/enem_elt.csv
 ```
+
+Tempos e throughput oficiais vêm de `desempenho`, sem monitor. CPU e RAM
+oficiais vêm de `recursos`, monitorado a cada 0,5 segundo; seus tempos são
+mantidos somente para diagnóstico.
 
 ## Schemas e tabelas físicas
 
