@@ -146,6 +146,24 @@ uma com seu arquivo `.gitkeep`. As subpastas internas serão criadas durante a
 extração dos pacotes oficiais. Os arquivos baixados não são rastreados pelo
 Git; preserve nomes, colunas, codificação e delimitadores.
 
+### Verificação da integridade dos dados
+
+O repositório disponibiliza o arquivo `data/benchmark/integridade/hashes_fontes.sha256`, contendo os hashes SHA-256 dos 84 arquivos utilizados como referência para o experimento. O manifesto contempla os dois CSVs do ENEM, os arquivos estaduais das três fontes do TSE e os quatro manifestos de seleção dos subconjuntos.
+
+Após preparar os dados de entrada, é possível verificar sua correspondência com o manifesto utilizando:
+
+```powershell
+Get-Content data/benchmark/integridade/hashes_fontes.sha256 | ForEach-Object {
+    $hash, $caminho = $_ -split '  ', 2
+    $atual = (Get-FileHash -LiteralPath $caminho -Algorithm SHA256).Hash
+    if ($atual -ine $hash) {
+        Write-Output "DIVERGENTE: $caminho"
+    }
+}
+```
+
+A ausência de divergências indica que os arquivos encontrados correspondem aos hashes registrados. Essa verificação permite identificar modificações nas fontes, mas não certifica, por si só, sua autenticidade em relação aos arquivos originalmente publicados pelo INEP e pelo TSE.
+
 ### ENEM
 
 Na página do INEP, baixe o pacote oficial **Microdados do Enem 2024** e
@@ -266,6 +284,9 @@ Após a certificação, execute a campanha global pelo orquestrador:
 ```powershell
 python src\benchmark.py --run-id oficial_01
 ```
+**Permissões de execução no Windows:** para a coleta de memória USS dos processos PostgreSQL, o benchmark deve ser executado em um terminal PowerShell com privilégios de administrador. Essa condição é necessária para permitir o acesso às informações detalhadas de memória dos processos pelo `psutil`, conforme verificado no ambiente experimental com Windows 11.
+
+Todas as execuções da campanha oficial, incluindo as modalidades de desempenho e recursos, devem utilizar o mesmo nível de privilégios, mantendo uniforme essa condição operacional.
 
 Com os valores padrão, o comando usa:
 
@@ -396,6 +417,7 @@ esse script.
   não são limpas automaticamente.
 - **Dependência Python ausente:** ative o ambiente virtual e execute
   `python -m pip install -r requirements.txt`.
+- **Erro psutil.AccessDenied na coleta de USS:** execute o PowerShell como administrador e verifique se o usuário possui permissão para consultar os processos PostgreSQL.
 
 ## Documentação complementar
 

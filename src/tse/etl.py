@@ -7,7 +7,6 @@ from decimal import Decimal, ROUND_HALF_UP
 from io import StringIO
 import os
 from pathlib import Path
-import threading
 import sys
 import time
 from typing import Any
@@ -24,10 +23,18 @@ except ModuleNotFoundError:
         diretorio_modalidade_obrigatorio,
         validar_execucao_inedita,
     )
-import psutil
 import psycopg2
 from psycopg2 import sql
 from dotenv import load_dotenv
+
+try:
+    from src.resource_monitor import MonitorRecursos, vincular_conexao_postgres
+except ModuleNotFoundError:
+    from resource_monitor import MonitorRecursos, vincular_conexao_postgres
+try:
+    from src.benchmark_output import imprimir_resultado_benchmark
+except ModuleNotFoundError:
+    from benchmark_output import imprimir_resultado_benchmark
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -594,8 +601,11 @@ def obter_conexao_postgres(database_url: str | None = None) -> ConexaoPostgres:
 
 def _conectar_postgres(conexao_postgres: ConexaoPostgres):
     if isinstance(conexao_postgres, str):
-        return psycopg2.connect(conexao_postgres)
-    return psycopg2.connect(**conexao_postgres)
+        conexao = psycopg2.connect(conexao_postgres)
+    else:
+        conexao = psycopg2.connect(**conexao_postgres)
+    vincular_conexao_postgres(conexao)
+    return conexao
 
 
 def carregar_produto(
@@ -652,101 +662,6 @@ def _imprimir_validacao(resultado: ResultadoValidacao) -> None:
     print("  Alertas: nenhum" if not resultado.alertas else "  Alertas:")
     for alerta in resultado.alertas:
         print(f"  - {alerta}")
-
-
-class MonitorRecursos:
-    def __init__(self, intervalo_segundos: float = 0.5) -> None:
-        self.intervalo_segundos = intervalo_segundos
-        self._processo_python = psutil.Process()
-        self._parar = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._amostras: list[dict[str, float]] = []
-
-    def iniciar(self) -> None:
-        self._parar.clear()
-        self._processo_python.cpu_percent(interval=None)
-        self._thread = threading.Thread(target=self._coletar, daemon=True)
-        self._thread.start()
-
-    def parar(self) -> dict[str, float]:
-        self._parar.set()
-        if self._thread:
-            self._thread.join()
-        self._registrar_amostra()
-        return self._consolidar()
-
-    def _coletar(self) -> None:
-        while not self._parar.wait(self.intervalo_segundos):
-            self._registrar_amostra()
-
-    def _registrar_amostra(self) -> None:
-        processos_postgres = []
-        for processo in psutil.process_iter(["name"]):
-            try:
-                if "postgres" in (processo.info["name"] or "").lower():
-                    processos_postgres.append(processo)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-
-        def cpu(processo: psutil.Process) -> float:
-            try:
-                return processo.cpu_percent(interval=None)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                return 0.0
-
-        def ram(processo: psutil.Process) -> int:
-            try:
-                return processo.memory_info().rss
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                return 0
-
-        def memoria_privada(processo: psutil.Process) -> int:
-            try:
-                memoria = processo.memory_info()
-                if hasattr(memoria, "private"):
-                    return memoria.private
-                return processo.memory_full_info().uss
-            except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
-                return 0
-
-        cpu_python = cpu(self._processo_python)
-        ram_python = ram(self._processo_python)
-        cpu_postgres = sum(cpu(processo) for processo in processos_postgres)
-        ram_postgres = sum(
-            memoria_privada(processo) for processo in processos_postgres
-        )
-        self._amostras.append(
-            {
-                "cpu_python": cpu_python,
-                "ram_python": float(ram_python),
-                "cpu_postgres": cpu_postgres,
-                "ram_postgres": float(ram_postgres),
-                "cpu_total": cpu_python + cpu_postgres,
-                "ram_total": float(ram_python + ram_postgres),
-            }
-        )
-
-    def _consolidar(self) -> dict[str, float]:
-        def media(chave: str) -> float:
-            return sum(item[chave] for item in self._amostras) / len(self._amostras)
-
-        def pico(chave: str) -> float:
-            return max(item[chave] for item in self._amostras)
-
-        return {
-            "cpu_media_python": media("cpu_python"),
-            "cpu_pico_python": pico("cpu_python"),
-            "ram_media_python_mb": media("ram_python") / (1024 * 1024),
-            "ram_pico_python_mb": pico("ram_python") / (1024 * 1024),
-            "cpu_media_postgres": media("cpu_postgres"),
-            "cpu_pico_postgres": pico("cpu_postgres"),
-            "ram_media_postgres_mb": media("ram_postgres") / (1024 * 1024),
-            "ram_pico_postgres_mb": pico("ram_postgres") / (1024 * 1024),
-            "cpu_media_total": media("cpu_total"),
-            "cpu_pico_total": pico("cpu_total"),
-            "ram_media_total_mb": media("ram_total") / (1024 * 1024),
-            "ram_pico_total_mb": pico("ram_total") / (1024 * 1024),
-        }
 
 
 def _iniciar_monitoramento(
@@ -861,11 +776,7 @@ def executar(args: argparse.Namespace) -> None:
         timestamp=datetime.now().isoformat(timespec="seconds"),
         **recursos,
     )
-    print(
-        f"Benchmark ETL TSE | volume={args.limite or 'todos'} | "
-        f"total={tempo_total:.3f}s | registros={quantidade} | "
-        f"throughput={resultado.throughput:.2f} registros/s"
-    )
+    imprimir_resultado_benchmark(resultado)
     if args.benchmark_output:
         _salvar_benchmark(resultado, args.benchmark_output)
         print(f"Resultado salvo em: {args.benchmark_output}")

@@ -12,6 +12,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 CAMPANHAS_DIR = BASE_DIR / "data" / "benchmark" / "campanhas"
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 MODALIDADES = ("desempenho", "recursos")
+DATASETS = ("enem", "tse")
 CAMPOS_IDENTIDADE = (
     "run_id",
     "modalidade",

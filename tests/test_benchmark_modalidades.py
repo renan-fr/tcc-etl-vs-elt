@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 from collections import defaultdict
-from dataclasses import fields
+from dataclasses import asdict, fields, replace
 import importlib.util
 import inspect
 import json
@@ -31,6 +31,7 @@ if importlib.util.find_spec("matplotlib") is None:
 
 from graficos import gerar_graficos
 from src import benchmark, benchmark_paths
+from src.benchmark_output import linhas_resultado_benchmark
 from src.enem import benchmark as benchmark_enem
 from src.tse import benchmark as benchmark_tse
 
@@ -128,6 +129,10 @@ class MatrizEOrquestradorTest(unittest.TestCase):
         self.assertEqual(sum("--sem-monitoramento" in c for c in comandos_1), 8)
         self.assertEqual(metadados["combinacoes"], 8)
         self.assertEqual(metadados["cenarios_processamento"], 4)
+        self.assertEqual(metadados["datasets"], list(benchmark.DATASETS))
+        self.assertEqual(metadados["volumes"], [100000])
+        self.assertEqual(metadados["rodadas"], 1)
+        self.assertEqual(metadados["run_id"], "teste_7")
         self.assertEqual(metadados["aquecimentos"], 8)
         self.assertEqual(metadados["medicoes_validas"], 8)
         self.assertEqual(metadados["execucoes_previstas"], 16)
@@ -191,6 +196,10 @@ class MatrizEOrquestradorTest(unittest.TestCase):
         self.assertEqual(metadados["aquecimentos"], 32)
         self.assertEqual(metadados["medicoes_validas"], 160)
         self.assertEqual(metadados["execucoes_previstas"], 192)
+        self.assertEqual(metadados["datasets"], list(benchmark.DATASETS))
+        self.assertEqual(metadados["volumes"], [100000, 250000, 500000, 1000000])
+        self.assertEqual(metadados["rodadas"], 5)
+        self.assertEqual(metadados["run_id"], "completa")
 
 
 class AmbienteCampanhaTest(unittest.TestCase):
@@ -383,28 +392,56 @@ class AmbienteCampanhaTest(unittest.TestCase):
 
 
 class MonitorESerializacaoTest(unittest.TestCase):
-    def test_resumo_enem_etl_preserva_numeros_e_indica_recurso_ausente(self) -> None:
+    def test_resumo_compartilhado_preserva_valores_e_indica_ausentes(self) -> None:
+        for modulo in PIPELINES:
+            resultado = resultado_sem_recursos(modulo)
+            antes = asdict(resultado)
+
+            linhas = linhas_resultado_benchmark(resultado)
+
+            with self.subTest(modulo=modulo.__name__):
+                self.assertEqual(asdict(resultado), antes)
+                self.assertEqual("\n".join(linhas).count("não monitorado"), 12)
+                self.assertIn("Tempo total: 1.000s", linhas)
+                self.assertIn("Throughput: 1.00 registros/s", linhas)
+
+    def test_resumo_exibe_valores_consolidados_sem_recalculo(self) -> None:
         modulo = PIPELINES[0]
-        resultado = resultado_sem_recursos(modulo)
-
-        linhas = modulo._linhas_resumo_benchmark(resultado)
-
-        self.assertIn("CPU media total: não monitorado", linhas)
-        self.assertIn("CPU pico total: não monitorado", linhas)
-        self.assertIn("RAM media total: não monitorado", linhas)
-        self.assertIn("RAM pico total: não monitorado", linhas)
-        self.assertNotIn("0.00", "\n".join(linhas))
-
+        base = resultado_sem_recursos(modulo)
         valores = {campo: 12.345 for campo in modulo.CAMPOS_RECURSOS}
         monitorado = modulo.ResultadoBenchmark(
             **{
-                campo.name: valores.get(campo.name, getattr(resultado, campo.name))
+                campo.name: (
+                    True
+                    if campo.name == "monitoramento_ativo"
+                    else valores.get(campo.name, getattr(base, campo.name))
+                )
                 for campo in fields(modulo.ResultadoBenchmark)
             }
         )
-        linhas_monitorado = modulo._linhas_resumo_benchmark(monitorado)
-        self.assertIn("CPU media total: 12.35%", linhas_monitorado)
-        self.assertIn("RAM media total: 12.35 MB", linhas_monitorado)
+
+        linhas = modulo._linhas_resumo_benchmark(monitorado)
+
+        self.assertIn(
+            "Agregado | CPU média: 12.35% | CPU pico: 12.35% | "
+            "RAM USS média: 12.35 MB | RAM USS pico: 12.35 MB",
+            linhas,
+        )
+
+        desativado = replace(monitorado, monitoramento_ativo=False)
+        self.assertEqual(
+            "\n".join(linhas_resultado_benchmark(desativado)).count(
+                "não monitorado"
+            ),
+            12,
+        )
+
+        sem_cpu_python = replace(monitorado, cpu_media_python=None)
+        self.assertIn(
+            "Python | CPU média: não monitorado | CPU pico: 12.35% | "
+            "RAM USS média: 12.35 MB | RAM USS pico: 12.35 MB",
+            linhas_resultado_benchmark(sem_cpu_python),
+        )
 
     def test_desempenho_nao_instancia_monitor_e_recursos_usa_meio_segundo(self) -> None:
         for modulo in PIPELINES:
