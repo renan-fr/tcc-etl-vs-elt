@@ -30,6 +30,10 @@ try:
     from src.resource_monitor import MonitorRecursos, vincular_conexao_postgres
 except ModuleNotFoundError:
     from resource_monitor import MonitorRecursos, vincular_conexao_postgres
+try:
+    from src.benchmark_output import imprimir_resultado_benchmark
+except ModuleNotFoundError:
+    from benchmark_output import imprimir_resultado_benchmark
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -1103,11 +1107,7 @@ def executar(args: argparse.Namespace) -> None:
         timestamp=datetime.now().isoformat(timespec="seconds"),
         **recursos,
     )
-    print(
-        f"Benchmark ELT TSE | volume={args.limite or 'todos'} | "
-        f"total={tempo_total:.3f}s | registros={quantidade} | "
-        f"throughput={resultado.throughput:.2f} registros/s"
-    )
+    imprimir_resultado_benchmark(resultado)
     if args.benchmark_output:
         _salvar_benchmark(resultado, args.benchmark_output)
         print(f"Resultado salvo em: {args.benchmark_output}")

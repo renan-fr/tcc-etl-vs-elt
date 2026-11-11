@@ -31,6 +31,16 @@ try:
     from src.resource_monitor import MonitorRecursos, vincular_conexao_postgres
 except ModuleNotFoundError:
     from resource_monitor import MonitorRecursos, vincular_conexao_postgres
+try:
+    from src.benchmark_output import (
+        imprimir_resultado_benchmark,
+        linhas_resultado_benchmark as _linhas_resumo_benchmark,
+    )
+except ModuleNotFoundError:
+    from benchmark_output import (
+        imprimir_resultado_benchmark,
+        linhas_resultado_benchmark as _linhas_resumo_benchmark,
+    )
 
 
 VALORES_DESCONHECIDOS: list[dict[str, object]] = []
@@ -1042,38 +1052,6 @@ def _salvar_resultado_benchmark(
     )
 
 
-def _linhas_resumo_benchmark(resultado: ResultadoBenchmark) -> list[str]:
-    volume = resultado.volume_configurado
-    volume_formatado = "todos" if volume is None else str(volume)
-
-    def recurso_formatado(valor: float | None, unidade: str) -> str:
-        if valor is None:
-            return "não monitorado"
-        return f"{valor:.2f}{unidade}"
-
-    return [
-        "Benchmark ETL ENEM:",
-        f"Volume configurado: {volume_formatado}",
-        f"Quantidade registros: {resultado.quantidade_registros}",
-        f"Linhas participantes: {resultado.linhas_participantes}",
-        f"Linhas resultados: {resultado.linhas_resultados}",
-        f"Tempo leitura: {resultado.tempo_leitura:.3f}s",
-        f"Tempo transformacao: {resultado.tempo_transformacao:.3f}s",
-        f"Tempo carga: {resultado.tempo_carga:.3f}s",
-        f"Tempo total: {resultado.tempo_total:.3f}s",
-        f"Throughput: {resultado.throughput:.2f} registros/s",
-        f"CPU media total: {recurso_formatado(resultado.cpu_media_total, '%')}",
-        f"CPU pico total: {recurso_formatado(resultado.cpu_pico_total, '%')}",
-        f"RAM media total: {recurso_formatado(resultado.ram_media_total_mb, ' MB')}",
-        f"RAM pico total: {recurso_formatado(resultado.ram_pico_total_mb, ' MB')}",
-    ]
-
-
-def _imprimir_resultado_benchmark(resultado: ResultadoBenchmark) -> None:
-    for linha in _linhas_resumo_benchmark(resultado):
-        print(linha)
-
-
 def _finalizar_benchmark(
     benchmark: bool,
     monitor: MonitorRecursos | None,
@@ -1119,7 +1097,7 @@ def _finalizar_benchmark(
         **recursos,
     )
 
-    _imprimir_resultado_benchmark(resultado)
+    imprimir_resultado_benchmark(resultado)
     if benchmark_output:
         _salvar_resultado_benchmark(resultado, benchmark_output)
         print(f"Resultado do benchmark salvo em: {benchmark_output}")

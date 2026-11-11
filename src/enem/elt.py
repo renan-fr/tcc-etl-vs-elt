@@ -30,6 +30,10 @@ try:
     from src.resource_monitor import MonitorRecursos, vincular_conexao_postgres
 except ModuleNotFoundError:
     from resource_monitor import MonitorRecursos, vincular_conexao_postgres
+try:
+    from src.benchmark_output import imprimir_resultado_benchmark
+except ModuleNotFoundError:
+    from benchmark_output import imprimir_resultado_benchmark
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -979,6 +983,7 @@ def finalizar_benchmark(
         linhas_resultados=tempos.linhas_resultados,
         timestamp=datetime.now().isoformat(timespec="seconds"), **recursos,
     )
+    imprimir_resultado_benchmark(resultado)
     if caminho_csv:
         salvar_benchmark(resultado, caminho_csv)
         print(f"Resultado do benchmark salvo em: {caminho_csv}")
