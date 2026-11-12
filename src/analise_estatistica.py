@@ -253,7 +253,7 @@ def _comparar(desempenho: list[dict[str, object]]) -> list[dict[str, object]]:
             raise AnaliseError(
                 f"Comparação impossível em {dataset}/{volume}: médias de tempo_total devem ser positivas"
             )
-        reducao = ((media_etl - media_elt) / media_etl) * 100
+        variacao = ((media_elt - media_etl) / media_etl) * 100
         saida.append({
             "dataset": dataset, "volume_configurado": volume,
             "tempo_total_etl_media": media_etl,
@@ -262,7 +262,7 @@ def _comparar(desempenho: list[dict[str, object]]) -> list[dict[str, object]]:
             "tempo_total_elt_media": elt["tempo_total_media"],
             "tempo_total_elt_desvio_padrao": elt["tempo_total_desvio_padrao"],
             "tempo_total_elt_mediana": elt["tempo_total_mediana"],
-            "reducao_tempo_pct": reducao,
+            "variacao_tempo_pct": variacao,
         })
     return saida
 
