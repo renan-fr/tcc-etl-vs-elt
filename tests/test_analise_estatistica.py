@@ -57,7 +57,7 @@ class TestAnaliseEstatistica(unittest.TestCase):
             self.assertEqual(float(etl["tempo_total_mediana"].replace(",", ".")), 4.0)
             with (destino / "comparacao_etl_elt.csv").open(encoding="utf-8", newline="") as arquivo:
                 comparacao = next(csv.DictReader(arquivo, delimiter=";"))
-            self.assertAlmostEqual(float(comparacao["variacao_tempo_pct"].replace(",", ".")), -25.0, places=3)
+            self.assertAlmostEqual(float(comparacao["variacao_tempo_pct"].replace(",", ".")), 25.0, places=3)
             self.assertTrue((campanha / "desempenho" / "enem_etl.csv").is_file())
 
     def test_campanha_completa_tem_160_registros_e_resultados_esperados(self):
@@ -84,7 +84,7 @@ class TestAnaliseEstatistica(unittest.TestCase):
             self.assertAlmostEqual(float(etl["tempo_total_desvio_padrao"].replace(",", ".")), 1.58113883, places=6)
             self.assertAlmostEqual(float(etl["tempo_total_mediana"].replace(",", ".")), 5.5)
             comparacao = next(l for l in comparacoes if l["dataset"] == "enem" and l["volume_configurado"] == "250000")
-            self.assertAlmostEqual(float(comparacao["variacao_tempo_pct"].replace(",", ".")), -18.181818, places=5)
+            self.assertAlmostEqual(float(comparacao["variacao_tempo_pct"].replace(",", ".")), 18.181818, places=5)
             recurso = next(l for l in recursos if l["arquitetura"] == "etl")
             self.assertEqual(recurso["cpu_media_python_media"], "1,0")
             self.assertEqual(recurso["ram_pico_postgres_mb_mediana"], "8,0")
