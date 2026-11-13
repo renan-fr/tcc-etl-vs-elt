@@ -576,9 +576,7 @@ Como indicador complementar, o monitor registrará `psutil.virtual_memory().avai
 no início da execução e em cada amostra. O CSV da modalidade `recursos` conterá
 `memoria_disponivel_inicial_mb` para diagnóstico e
 `memoria_disponivel_reducao_maxima_mb`, calculado como a maior diferença entre o
-valor inicial e uma amostra posterior, em MB. A métrica não será limitada a
-zero: caso a memória disponível não fique abaixo do valor inicial, será
-registrado `0`.
+valor inicial e uma amostra posterior, em MB. A métrica terá limite inferior de zero. Caso a memória disponível não fique abaixo do valor inicial durante a execução, será registrado 0, indicando ausência de redução observada.
 
 ---
 
