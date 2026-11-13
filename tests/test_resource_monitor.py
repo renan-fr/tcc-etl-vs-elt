@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -692,6 +693,7 @@ class MonitorRecursosTest(unittest.TestCase):
         with mock.patch.object(rm.psutil, "Process", return_value=python):
             monitor = rm.MonitorRecursos()
 
+        monitor._cpu_times_python_anterior = monitor._ler_cpu_times(python, "Python")
         identidade = (20, 20.0)
         monitor._processos_postgres[identidade] = postgres
         monitor._inicializar_cpu_times_postgres(identidade, postgres)
@@ -746,7 +748,7 @@ class MonitorRecursosTest(unittest.TestCase):
         monitor._registrar_cpu_times_amostra(set())
         sem_leitura = monitor.consolidar_cpu_times_experimental()
         self.assertIsNone(sem_leitura["cpu_times_total_s"])
-        self.assertEqual(sem_leitura["cpu_times_status"], "sem_leituras_validas")
+        self.assertEqual(sem_leitura["cpu_times_status"], "parcial_ha_processos_incompletos")
 
         monitor._cpu_times_acumulado_python = 0.98
         monitor._cpu_times_acumulado_postgres = 0.39
@@ -764,6 +766,87 @@ class MonitorRecursosTest(unittest.TestCase):
             resultado["cpu_times_integrado_percent_postgres_s"],
             delta=0.3,
         )
+
+    def test_cpu_times_regressao_individual_de_user_descarta_delta_e_marca_parcial(self) -> None:
+        python = ProcessoFalso(
+            10, nome="python.exe", cpu_times=[(10.0, 4.0), (9.0, 5.0), (10.0, 6.0)]
+        )
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos()
+        monitor._cpu_times_python_anterior = monitor._ler_cpu_times(python, "Python")
+        monitor._registrar_cpu_times_amostra(set())
+        monitor._registrar_cpu_times_amostra(set())
+
+        resultado = monitor.consolidar_cpu_times_experimental()
+
+        self.assertAlmostEqual(resultado["cpu_times_python_s"], 2.0)
+        self.assertEqual(resultado["cpu_times_leituras_validas"], 1)
+        self.assertEqual(resultado["cpu_times_status"], "parcial_ha_processos_incompletos")
+
+    def test_cpu_times_regressao_individual_de_system_descarta_delta_e_marca_parcial(self) -> None:
+        python = ProcessoFalso(
+            10, nome="python.exe", cpu_times=[(10.0, 4.0), (11.0, 3.0), (12.0, 4.0)]
+        )
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos()
+        monitor._cpu_times_python_anterior = monitor._ler_cpu_times(python, "Python")
+        monitor._registrar_cpu_times_amostra(set())
+        monitor._registrar_cpu_times_amostra(set())
+
+        resultado = monitor.consolidar_cpu_times_experimental()
+
+        self.assertAlmostEqual(resultado["cpu_times_python_s"], 2.0)
+        self.assertEqual(resultado["cpu_times_leituras_validas"], 1)
+        self.assertEqual(resultado["cpu_times_status"], "parcial_ha_processos_incompletos")
+
+    def test_cpu_times_falha_inicial_postgres_recupera_sem_apagar_incompletude(self) -> None:
+        python = ProcessoFalso(
+            10, nome="python.exe", cpu_times=[(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
+        )
+        postgres = ProcessoFalso(
+            20,
+            cpu_times=[
+                psutil.AccessDenied(20),
+                (5.0, 2.0),
+                (5.5, 2.2),
+            ],
+        )
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos()
+        monitor._cpu_times_python_anterior = monitor._ler_cpu_times(python, "Python")
+        identidade = (20, 20.0)
+        monitor._processos_postgres[identidade] = postgres
+        monitor._inicializar_cpu_times_postgres(identidade, postgres)
+
+        monitor._registrar_cpu_times_amostra(set())
+        monitor._registrar_cpu_times_amostra(set())
+
+        resultado = monitor.consolidar_cpu_times_experimental()
+
+        self.assertAlmostEqual(resultado["cpu_times_postgres_s"], 0.7)
+        self.assertEqual(resultado["cpu_times_leituras_validas_postgres"], 1)
+        self.assertEqual(resultado["cpu_times_processos_incompletos"], 1)
+        self.assertEqual(resultado["cpu_times_status"], "parcial_ha_processos_incompletos")
+
+    def test_cpu_times_rejeita_nan_infinito_e_delta_negativo(self) -> None:
+        python = ProcessoFalso(
+            10,
+            nome="python.exe",
+            cpu_times=[(1.0, 1.0), (math.nan, 2.0), (math.inf, 3.0), (0.5, 4.0)],
+        )
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos()
+        monitor._cpu_times_python_anterior = monitor._ler_cpu_times(python, "Python")
+        monitor._registrar_cpu_times_amostra(set())
+        monitor._registrar_cpu_times_amostra(set())
+        monitor._registrar_cpu_times_amostra(set())
+
+        resultado = monitor.consolidar_cpu_times_experimental()
+
+        self.assertIsNone(resultado["cpu_times_python_s"])
+        self.assertEqual(resultado["cpu_times_leituras_validas"], 0)
+        self.assertEqual(resultado["cpu_times_processos_incompletos"], 1)
+        self.assertEqual(resultado["cpu_times_status"], "parcial_ha_processos_incompletos")
     def test_instancia_remota_e_rejeitada_explicitamente(self) -> None:
         python = ProcessoFalso(10, nome="python.exe")
         with mock.patch.object(rm.psutil, "Process", return_value=python):

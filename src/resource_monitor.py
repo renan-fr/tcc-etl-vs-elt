@@ -8,6 +8,7 @@ numero de CPUs e aplicada.
 from __future__ import annotations
 
 import ipaddress
+import math
 import socket
 import threading
 import time
@@ -314,7 +315,11 @@ class MonitorRecursos:
         """Le user/system sem tornar a medicao oficial dependente do experimento."""
         try:
             tempos = processo.cpu_times()
-            return float(tempos.user), float(tempos.system)
+            user = float(tempos.user)
+            system = float(tempos.system)
+            if not math.isfinite(user) or not math.isfinite(system):
+                return None
+            return user, system
         except (psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied):
             return None
         except (AttributeError, TypeError, ValueError):
@@ -327,10 +332,17 @@ class MonitorRecursos:
     ) -> float | None:
         if anterior is None or atual is None:
             return None
-        delta = (atual[0] - anterior[0]) + (atual[1] - anterior[1])
-        if delta < 0:
+        delta_user = atual[0] - anterior[0]
+        delta_system = atual[1] - anterior[1]
+        if (
+            not math.isfinite(delta_user)
+            or not math.isfinite(delta_system)
+            or delta_user < 0
+            or delta_system < 0
+        ):
             return None
-        return delta
+        delta = delta_user + delta_system
+        return delta if math.isfinite(delta) else None
 
     def _inicializar_cpu_times_postgres(
         self,
@@ -341,6 +353,8 @@ class MonitorRecursos:
         atual = self._ler_cpu_times(processo, "PostgreSQL")
         self._cpu_times_postgres_anteriores[identidade] = atual
         self._cpu_times_processos_novos += 1
+        if atual is None:
+            self._cpu_times_processos_incompletos.add(identidade)
 
     def _registrar_cpu_times_amostra(
         self,
@@ -355,7 +369,7 @@ class MonitorRecursos:
             self._cpu_times_acumulado_python += delta_python
             self._cpu_times_leituras_validas += 1
             self._cpu_times_leituras_validas_python += 1
-        elif atual_python is None:
+        elif delta_python is None:
             self._cpu_times_python_incompleto = True
         self._cpu_times_python_anterior = atual_python
 
@@ -413,17 +427,23 @@ class MonitorRecursos:
                 "cpu_times_integrado_percent_postgres_s": integrados[1],
                 "cpu_times_integrado_percent_total_s": integrados[2],
                 "cpu_times_leituras_validas": self._cpu_times_leituras_validas,
+                "cpu_times_leituras_validas_python": (
+                    self._cpu_times_leituras_validas_python
+                ),
+                "cpu_times_leituras_validas_postgres": (
+                    self._cpu_times_leituras_validas_postgres
+                ),
                 "cpu_times_processos_novos": self._cpu_times_processos_novos,
                 "cpu_times_processos_encerrados": self._cpu_times_processos_encerrados,
                 "cpu_times_processos_incompletos": len(
                     self._cpu_times_processos_incompletos
                 ) + int(self._cpu_times_python_incompleto),
                 "cpu_times_status": (
-                    "sem_leituras_validas"
-                    if self._cpu_times_leituras_validas == 0
-                    else "parcial_ha_processos_incompletos"
+                    "parcial_ha_processos_incompletos"
                     if self._cpu_times_processos_incompletos
                     or self._cpu_times_python_incompleto
+                    else "sem_leituras_validas"
+                    if self._cpu_times_leituras_validas == 0
                     else "valida"
                 ),
             }

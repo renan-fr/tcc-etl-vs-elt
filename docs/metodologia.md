@@ -531,9 +531,13 @@ marcada como parcial. Um processo que surge só é contabilizado a partir da
 descoberta, portanto seu consumo entre a criação e essa descoberta fica fora
 do acumulado. `AccessDenied`, processo inexistente, contador indisponível ou
 contador que retrocede não produzem delta artificial: a leitura fica inválida
-e o status registra a ausência ou incompletude. A integração de percentuais é
-apenas aproximada, pois usa as janelas e regras da coleta de
-`cpu_percent()`.
+e o status registra a ausência ou incompletude. A regressão de `user` ou de
+`system` invalida o delta inteiro, mesmo que o outro componente tenha crescido.
+Se a primeira leitura de um processo PostgreSQL falhar, a perda permanece
+registrada como incompleta; uma leitura posterior pode estabelecer nova
+referência e gerar deltas futuros, mas não torna o histórico plenamente
+válido. A integração de percentuais é apenas aproximada, pois usa as janelas e
+regras da coleta de `cpu_percent()`.
 
 ### Memória RAM
 
