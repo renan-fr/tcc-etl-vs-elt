@@ -767,6 +767,23 @@ class MonitorRecursosTest(unittest.TestCase):
             delta=0.3,
         )
 
+    def test_cpu_times_python_valido_postgres_sem_delta_e_parcial(self) -> None:
+        python = ProcessoFalso(10, nome="python.exe")
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos()
+
+        monitor._postgres_vinculado = True
+        monitor._cpu_times_acumulado_python = 1.25
+        monitor._cpu_times_leituras_validas = 1
+        monitor._cpu_times_leituras_validas_python = 1
+
+        resultado = monitor.consolidar_cpu_times_experimental()
+
+        self.assertEqual(resultado["cpu_times_python_s"], 1.25)
+        self.assertIsNone(resultado["cpu_times_postgres_s"])
+        self.assertIsNone(resultado["cpu_times_total_s"])
+        self.assertEqual(resultado["cpu_times_status"], "parcial_ha_componentes_sem_deltas")
+
     def test_cpu_times_regressao_individual_de_user_descarta_delta_e_marca_parcial(self) -> None:
         python = ProcessoFalso(
             10, nome="python.exe", cpu_times=[(10.0, 4.0), (9.0, 5.0), (10.0, 6.0)]

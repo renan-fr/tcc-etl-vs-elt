@@ -539,6 +539,15 @@ referência e gerar deltas futuros, mas não torna o histórico plenamente
 válido. A integração de percentuais é apenas aproximada, pois usa as janelas e
 regras da coleta de `cpu_percent()`.
 
+Os estados da consolidação experimental têm a seguinte semântica: `valida`
+exige pelo menos um delta válido de Python e um de PostgreSQL, sem perdas
+registradas; `parcial_ha_processos_incompletos` indica que houve alguma perda
+de leitura ou processo encerrado sem consumo final recuperável;
+`parcial_ha_componentes_sem_deltas` indica que um dos componentes não possui
+delta válido, mesmo que o outro possua; e `sem_leituras_validas` indica que
+nenhum delta foi validado. Em qualquer estado parcial ou insuficiente,
+`cpu_times_total_s` permanece nulo.
+
 ### Memória RAM
 
 A métrica de memória será a USS (*Unique Set Size*), obtida homogeneamente para

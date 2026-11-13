@@ -418,6 +418,20 @@ class MonitorRecursos:
                 if python is not None and postgres is not None
                 else None
             )
+            tem_leitura_python = self._cpu_times_leituras_validas_python > 0
+            tem_leitura_postgres = self._cpu_times_leituras_validas_postgres > 0
+            ha_incompletudes = bool(
+                self._cpu_times_processos_incompletos
+                or self._cpu_times_python_incompleto
+            )
+            if ha_incompletudes:
+                status = "parcial_ha_processos_incompletos"
+            elif not self._cpu_times_leituras_validas:
+                status = "sem_leituras_validas"
+            elif not (tem_leitura_python and tem_leitura_postgres):
+                status = "parcial_ha_componentes_sem_deltas"
+            else:
+                status = "valida"
             integrados = self._integrar_cpu_percent_experimental()
             return {
                 "cpu_times_python_s": python,
@@ -438,14 +452,7 @@ class MonitorRecursos:
                 "cpu_times_processos_incompletos": len(
                     self._cpu_times_processos_incompletos
                 ) + int(self._cpu_times_python_incompleto),
-                "cpu_times_status": (
-                    "parcial_ha_processos_incompletos"
-                    if self._cpu_times_processos_incompletos
-                    or self._cpu_times_python_incompleto
-                    else "sem_leituras_validas"
-                    if self._cpu_times_leituras_validas == 0
-                    else "valida"
-                ),
+                "cpu_times_status": status,
             }
 
     def _integrar_cpu_percent_experimental(self) -> tuple[float, float, float]:
