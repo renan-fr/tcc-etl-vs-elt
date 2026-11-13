@@ -112,17 +112,6 @@ def salvar(fig: plt.Figure, nome: str, figuras_dir: Path) -> None:
     plt.close(fig)
 
 
-def gerar_figura_geral(df: pd.DataFrame, figuras_dir: Path) -> None:
-    medias = df.groupby("arquitetura")["tempo_total_s"].mean().reindex(["ETL", "ELT"])
-    fig, ax = plt.subplots(figsize=(5.8, 4.0))
-    barras = ax.bar(medias.index, medias.values, color=[CORES[a] for a in medias.index], width=0.58)
-    configurar_eixos(ax, limite_y=25)
-    ax.set_xlabel("Arquitetura")
-    adicionar_rotulos(ax, barras)
-    fig.tight_layout()
-    salvar(fig, "tempo_medio_geral", figuras_dir)
-
-
 def gerar_figura_dataset(df: pd.DataFrame, figuras_dir: Path) -> None:
     medias = df.groupby(["dataset", "arquitetura"])["tempo_total_s"].mean().unstack("arquitetura").reindex(index=["ENEM", "TSE"], columns=["ETL", "ELT"])
     fig, ax = plt.subplots(figsize=(6.6, 4.0))
@@ -190,9 +179,6 @@ def main() -> int:
     print(contagens.to_string())
     print("\nMédias calculadas (s):")
     print(medias.to_frame().round(3).to_string())
-    print("\nMédia geral por arquitetura (s):")
-    print(df.groupby("arquitetura")["tempo_total_s"].mean().round(3).to_string())
-    gerar_figura_geral(df, figuras_dir)
     gerar_figura_dataset(df, figuras_dir)
     gerar_figura_linhas(df, "ENEM", figuras_dir)
     gerar_figura_linhas(df, "TSE", figuras_dir)
