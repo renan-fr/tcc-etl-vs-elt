@@ -83,6 +83,21 @@ class MonitorRecursos:
         self._lock = threading.RLock()
         self._resultado: dict[str, float | None] | None = None
         self._memoria_disponivel_inicial: int | None = None
+        # Medicao experimental: nao participa de _consolidar() nem dos CSVs.
+        self._cpu_times_python_anterior: tuple[float, float] | None = None
+        self._cpu_times_postgres_anteriores: dict[
+            tuple[int, float], tuple[float, float] | None
+        ] = {}
+        self._cpu_times_acumulado_python = 0.0
+        self._cpu_times_acumulado_postgres = 0.0
+        self._cpu_times_leituras_validas = 0
+        self._cpu_times_leituras_validas_python = 0
+        self._cpu_times_leituras_validas_postgres = 0
+        self._cpu_times_python_incompleto = False
+        self._cpu_times_processos_incompletos: set[tuple[int, float]] = set()
+        self._cpu_times_processos_ja_encerrados: set[tuple[int, float]] = set()
+        self._cpu_times_processos_novos = 0
+        self._cpu_times_processos_encerrados = 0
 
     def iniciar(self) -> None:
         global _monitor_ativo
@@ -94,6 +109,9 @@ class MonitorRecursos:
             self._parar.clear()
             self._memoria_disponivel_inicial = self._ler_memoria_disponivel()
             self._processo_python.cpu_percent(interval=None)
+            self._cpu_times_python_anterior = self._ler_cpu_times(
+                self._processo_python, "Python"
+            )
             self._ultimo_instante = self._relogio()
             self._thread = threading.Thread(target=self._coletar, daemon=True)
             self._thread.start()
@@ -270,7 +288,11 @@ class MonitorRecursos:
                     and identidade_antiga != identidade
                 ):
                     self._processos_postgres.pop(identidade_antiga)
+                    self._cpu_times_postgres_anteriores.pop(identidade_antiga, None)
+                    self._cpu_times_processos_incompletos.add(identidade_antiga)
+                    self._cpu_times_processos_encerrados += 1
             self._processos_postgres[identidade] = processo
+            self._inicializar_cpu_times_postgres(identidade, processo)
             novos.add(identidade)
         return novos
 
@@ -284,6 +306,143 @@ class MonitorRecursos:
             raise ErroMonitoramentoRecursos(
                 f"Acesso negado ao ler CPU de {rotulo} (PID {processo.pid})."
             ) from erro
+
+    @staticmethod
+    def _ler_cpu_times(
+        processo: psutil.Process, rotulo: str
+    ) -> tuple[float, float] | None:
+        """Le user/system sem tornar a medicao oficial dependente do experimento."""
+        try:
+            tempos = processo.cpu_times()
+            return float(tempos.user), float(tempos.system)
+        except (psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied):
+            return None
+        except (AttributeError, TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _delta_cpu_times(
+        anterior: tuple[float, float] | None,
+        atual: tuple[float, float] | None,
+    ) -> float | None:
+        if anterior is None or atual is None:
+            return None
+        delta = (atual[0] - anterior[0]) + (atual[1] - anterior[1])
+        if delta < 0:
+            return None
+        return delta
+
+    def _inicializar_cpu_times_postgres(
+        self,
+        identidade: tuple[int, float],
+        processo: psutil.Process,
+    ) -> None:
+        """Estabelece a fronteira do processo novo sem contar CPU anterior."""
+        atual = self._ler_cpu_times(processo, "PostgreSQL")
+        self._cpu_times_postgres_anteriores[identidade] = atual
+        self._cpu_times_processos_novos += 1
+
+    def _registrar_cpu_times_amostra(
+        self,
+        novos: set[tuple[int, float]],
+    ) -> None:
+        """Acumula deltas uma vez por amostra, mantendo identidades PID/create_time."""
+        atual_python = self._ler_cpu_times(self._processo_python, "Python")
+        delta_python = self._delta_cpu_times(
+            self._cpu_times_python_anterior, atual_python
+        )
+        if delta_python is not None:
+            self._cpu_times_acumulado_python += delta_python
+            self._cpu_times_leituras_validas += 1
+            self._cpu_times_leituras_validas_python += 1
+        elif atual_python is None:
+            self._cpu_times_python_incompleto = True
+        self._cpu_times_python_anterior = atual_python
+
+        for identidade, processo in list(self._processos_postgres.items()):
+            if identidade in novos or identidade in self._cpu_times_processos_ja_encerrados:
+                continue
+            atual = self._ler_cpu_times(processo, "PostgreSQL")
+            anterior = self._cpu_times_postgres_anteriores.get(identidade)
+            delta = self._delta_cpu_times(anterior, atual)
+            if delta is not None:
+                self._cpu_times_acumulado_postgres += delta
+                self._cpu_times_leituras_validas += 1
+                self._cpu_times_leituras_validas_postgres += 1
+            else:
+                self._cpu_times_processos_incompletos.add(identidade)
+                if atual is None:
+                    self._cpu_times_processos_encerrados += 1
+                    self._cpu_times_postgres_anteriores.pop(identidade, None)
+                    self._cpu_times_processos_ja_encerrados.add(identidade)
+                    continue
+            self._cpu_times_postgres_anteriores[identidade] = atual
+
+    def consolidar_cpu_times_experimental(
+        self,
+    ) -> dict[str, float | int | None | str]:
+        """Retorna a medicao experimental sem alterar o resultado oficial.
+
+        ``None`` nos acumulados indica que nao houve delta valido. Processos
+        novos sao contabilizados a partir da primeira fronteira observada;
+        processos encerrados antes da ultima leitura podem ter consumo final
+        desconhecido e aparecem em ``processos_incompletos``.
+        """
+        with self._lock:
+            python = (
+                self._cpu_times_acumulado_python
+                if self._cpu_times_leituras_validas_python
+                else None
+            )
+            postgres = (
+                self._cpu_times_acumulado_postgres
+                if self._cpu_times_leituras_validas_postgres
+                else None
+            )
+            total = (
+                python + postgres
+                if python is not None and postgres is not None
+                else None
+            )
+            integrados = self._integrar_cpu_percent_experimental()
+            return {
+                "cpu_times_python_s": python,
+                "cpu_times_postgres_s": postgres,
+                "cpu_times_total_s": total,
+                "cpu_times_integrado_percent_python_s": integrados[0],
+                "cpu_times_integrado_percent_postgres_s": integrados[1],
+                "cpu_times_integrado_percent_total_s": integrados[2],
+                "cpu_times_leituras_validas": self._cpu_times_leituras_validas,
+                "cpu_times_processos_novos": self._cpu_times_processos_novos,
+                "cpu_times_processos_encerrados": self._cpu_times_processos_encerrados,
+                "cpu_times_processos_incompletos": len(
+                    self._cpu_times_processos_incompletos
+                ) + int(self._cpu_times_python_incompleto),
+                "cpu_times_status": (
+                    "sem_leituras_validas"
+                    if self._cpu_times_leituras_validas == 0
+                    else "parcial_ha_processos_incompletos"
+                    if self._cpu_times_processos_incompletos
+                    or self._cpu_times_python_incompleto
+                    else "valida"
+                ),
+            }
+
+    def _integrar_cpu_percent_experimental(self) -> tuple[float, float, float]:
+        python = 0.0
+        postgres = 0.0
+        for amostra in self._amostras:
+            duracao_python = amostra.get("duracao_cpu_python")
+            valor_python = amostra.get("cpu_python")
+            if duracao_python is not None and valor_python is not None:
+                python += float(valor_python) / 100.0 * float(duracao_python)
+            if amostra.get("cpu_postgres_convencional", False):
+                continue
+            duracao_postgres = amostra.get("duracao_cpu_postgres")
+            valor_postgres = amostra.get("cpu_postgres")
+            if duracao_postgres is not None and valor_postgres is not None:
+                postgres += float(valor_postgres) / 100.0 * float(duracao_postgres)
+        return python, postgres, python + postgres
 
     @staticmethod
     def _ler_ram_python(processo: psutil.Process) -> int | None:
@@ -376,6 +535,7 @@ class MonitorRecursos:
                 raise ErroMonitoramentoRecursos("Intervalo de amostragem de CPU invalido.")
 
             novos = self._descobrir_e_inicializar_processos()
+            self._registrar_cpu_times_amostra(novos)
             memoria_disponivel = self._ler_memoria_disponivel()
             cpu_python = self._ler_cpu(self._processo_python, "Python")
             ram_python = self._ler_ram_python(self._processo_python)

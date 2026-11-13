@@ -17,6 +17,7 @@ class ProcessoFalso:
         nome: str = "postgres.exe",
         criado: float | None = None,
         cpu: list[float | BaseException] | None = None,
+        cpu_times: list[tuple[float, float] | BaseException] | None = None,
         pai: ProcessoFalso | None = None,
         uss: int | BaseException = 4096,
     ) -> None:
@@ -24,6 +25,8 @@ class ProcessoFalso:
         self._nome = nome
         self._criado = float(criado if criado is not None else pid)
         self._cpu = list(cpu or [0.0])
+        self._cpu_times = list(cpu_times or [(0.0, 0.0)])
+        self._ultimo_cpu_times = self._cpu_times[-1]
         self._pai = pai
         self._uss = uss
         self.filhos: list[ProcessoFalso] = []
@@ -48,6 +51,13 @@ class ProcessoFalso:
         if isinstance(valor, BaseException):
             raise valor
         return valor
+
+    def cpu_times(self):
+        valor = self._cpu_times.pop(0) if self._cpu_times else self._ultimo_cpu_times
+        if isinstance(valor, BaseException):
+            raise valor
+        self._ultimo_cpu_times = valor
+        return SimpleNamespace(user=valor[0], system=valor[1])
 
     def memory_info(self):
         return SimpleNamespace(rss=1024, private=2048)
@@ -642,6 +652,118 @@ class MonitorRecursosTest(unittest.TestCase):
             monitor.parar()
         self.assertIsInstance(contexto.exception.__cause__, ValueError)
 
+    def test_cpu_times_acumula_deltas_de_python_e_multiplos_postgres(self) -> None:
+        python = ProcessoFalso(
+            10, nome="python.exe", cpu_times=[(1.0, 1.0), (1.6, 1.2), (2.0, 1.5)]
+        )
+        postgres_a = ProcessoFalso(
+            20, cpu_times=[(2.0, 1.0), (2.4, 1.1), (3.0, 1.4)]
+        )
+        postgres_b = ProcessoFalso(
+            21, cpu_times=[(5.0, 1.0), (5.2, 1.5), (5.5, 1.6)]
+        )
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos()
+
+        monitor._cpu_times_python_anterior = monitor._ler_cpu_times(python, "Python")
+        monitor._processos_postgres = {(20, 20.0): postgres_a, (21, 21.0): postgres_b}
+        monitor._cpu_times_postgres_anteriores = {
+            (20, 20.0): monitor._ler_cpu_times(postgres_a, "PostgreSQL"),
+            (21, 21.0): monitor._ler_cpu_times(postgres_b, "PostgreSQL"),
+        }
+        monitor._registrar_cpu_times_amostra(set())
+        monitor._registrar_cpu_times_amostra(set())
+
+        resultado = monitor.consolidar_cpu_times_experimental()
+
+        self.assertAlmostEqual(resultado["cpu_times_python_s"], 1.5)
+        self.assertAlmostEqual(resultado["cpu_times_postgres_s"], 2.5)
+        self.assertEqual(resultado["cpu_times_leituras_validas"], 6)
+        self.assertEqual(resultado["cpu_times_status"], "valida")
+
+    def test_cpu_times_processo_novo_comeca_na_fronteira_e_encerramento_e_incompleto(self) -> None:
+        python = ProcessoFalso(
+            10, nome="python.exe", cpu_times=[(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
+        )
+        postgres = ProcessoFalso(
+            20,
+            cpu_times=[(10.0, 2.0), (10.5, 2.1), psutil.NoSuchProcess(20)],
+        )
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos()
+
+        identidade = (20, 20.0)
+        monitor._processos_postgres[identidade] = postgres
+        monitor._inicializar_cpu_times_postgres(identidade, postgres)
+        monitor._registrar_cpu_times_amostra({identidade})
+        monitor._registrar_cpu_times_amostra(set())
+        monitor._registrar_cpu_times_amostra(set())
+
+        resultado = monitor.consolidar_cpu_times_experimental()
+
+        self.assertAlmostEqual(resultado["cpu_times_postgres_s"], 0.6)
+        self.assertEqual(resultado["cpu_times_processos_novos"], 1)
+        self.assertEqual(resultado["cpu_times_processos_encerrados"], 1)
+        self.assertEqual(resultado["cpu_times_processos_incompletos"], 1)
+        self.assertEqual(resultado["cpu_times_status"], "parcial_ha_processos_incompletos")
+
+    def test_cpu_times_reutilizacao_de_pid_descarta_contador_da_identidade_antiga(self) -> None:
+        python = ProcessoFalso(10, nome="python.exe")
+        raiz = ProcessoFalso(20, criado=20.0, cpu_times=[(1.0, 1.0)])
+        novo = ProcessoFalso(20, criado=30.0, cpu_times=[(100.0, 1.0)])
+        with mock.patch.object(rm.psutil, "Process", side_effect=[python, raiz]):
+            monitor = rm.MonitorRecursos()
+            monitor._raiz_postgres = raiz
+            monitor._identidade_raiz = (20, 20.0)
+            monitor._processos_postgres[(20, 20.0)] = raiz
+            monitor._cpu_times_postgres_anteriores[(20, 20.0)] = (8.0, 2.0)
+            with mock.patch.object(raiz, "children", return_value=[novo]):
+                monitor._descobrir_e_inicializar_processos()
+
+        self.assertNotIn((20, 20.0), monitor._cpu_times_postgres_anteriores)
+        self.assertEqual(monitor._cpu_times_postgres_anteriores[(20, 30.0)], (100.0, 1.0))
+        self.assertEqual(monitor._cpu_times_processos_encerrados, 1)
+
+    def test_cpu_times_sem_leituras_validas_e_coerencia_aproximada_com_cpu_percent(self) -> None:
+        python = ProcessoFalso(
+            10, nome="python.exe", cpu_times=[psutil.AccessDenied(10), psutil.AccessDenied(10)]
+        )
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos()
+        monitor._cpu_times_python_anterior = monitor._ler_cpu_times(python, "Python")
+        monitor._amostras = [
+            {
+                "duracao_cpu_python": 1.0, "duracao_cpu_postgres": 1.0,
+                "cpu_python": 50.0, "cpu_postgres": 20.0,
+                "cpu_postgres_convencional": False,
+            },
+            {
+                "duracao_cpu_python": 2.0, "duracao_cpu_postgres": 2.0,
+                "cpu_python": 25.0, "cpu_postgres": 10.0,
+                "cpu_postgres_convencional": False,
+            },
+        ]
+        monitor._registrar_cpu_times_amostra(set())
+        sem_leitura = monitor.consolidar_cpu_times_experimental()
+        self.assertIsNone(sem_leitura["cpu_times_total_s"])
+        self.assertEqual(sem_leitura["cpu_times_status"], "sem_leituras_validas")
+
+        monitor._cpu_times_acumulado_python = 0.98
+        monitor._cpu_times_acumulado_postgres = 0.39
+        monitor._cpu_times_leituras_validas = 2
+        monitor._cpu_times_leituras_validas_python = 1
+        monitor._cpu_times_leituras_validas_postgres = 1
+        resultado = monitor.consolidar_cpu_times_experimental()
+        self.assertAlmostEqual(
+            resultado["cpu_times_python_s"],
+            resultado["cpu_times_integrado_percent_python_s"],
+            delta=0.3,
+        )
+        self.assertAlmostEqual(
+            resultado["cpu_times_postgres_s"],
+            resultado["cpu_times_integrado_percent_postgres_s"],
+            delta=0.3,
+        )
     def test_instancia_remota_e_rejeitada_explicitamente(self) -> None:
         python = ProcessoFalso(10, nome="python.exe")
         with mock.patch.object(rm.psutil, "Process", return_value=python):

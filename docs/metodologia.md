@@ -507,6 +507,34 @@ são identificados internamente como convencionais e não representam medições
 efetivas iguais a zero; falhas reais de coleta permanecem inválidas e não são
 convertidas em zero.
 
+#### Medição experimental de tempo de CPU acumulado
+
+Na branch experimental `experiment/cpu-times`, o monitor também investiga
+`psutil.Process.cpu_times()`. A métrica soma, em segundos, os deltas de
+`user + system` do processo Python e dos processos PostgreSQL identificados
+pela tupla `(PID, tempo de criação)`. O baseline do Python é estabelecido no
+início do monitoramento; para PostgreSQL, cada processo novo recebe seu
+baseline na descoberta. Assim, CPU anterior ao monitoramento não é contada e
+um processo novo não reaproveita o contador de uma identidade antiga.
+
+O resultado pode ser consultado por
+`MonitorRecursos.consolidar_cpu_times_experimental()`. Ele é deliberadamente
+separado de `_consolidar()`: não substitui `cpu_percent()`, não altera o
+resultado retornado por `parar()`, não cria campos nos CSVs e não é consumido
+pelos pipelines ou pela análise estatística. O resultado experimental também
+expõe uma integração aproximada de `cpu_percent / 100 * duração` para
+comparação de coerência, além de contagens e um status de validade.
+
+Há limitações importantes. Se um processo encerrar entre duas leituras, o
+consumo ocorrido depois da última leitura não pode ser recuperado; a medição é
+marcada como parcial. Um processo que surge só é contabilizado a partir da
+descoberta, portanto seu consumo entre a criação e essa descoberta fica fora
+do acumulado. `AccessDenied`, processo inexistente, contador indisponível ou
+contador que retrocede não produzem delta artificial: a leitura fica inválida
+e o status registra a ausência ou incompletude. A integração de percentuais é
+apenas aproximada, pois usa as janelas e regras da coleta de
+`cpu_percent()`.
+
 ### Memória RAM
 
 A métrica de memória será a USS (*Unique Set Size*), obtida homogeneamente para
