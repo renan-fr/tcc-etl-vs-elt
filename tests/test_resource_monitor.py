@@ -85,12 +85,15 @@ class MonitorRecursosTest(unittest.TestCase):
     def test_iniciar_faz_priming_do_python_antes_da_thread(self) -> None:
         python = ProcessoFalso(10, nome="python.exe", cpu=[0.0])
         with mock.patch.object(rm.psutil, "Process", return_value=python), mock.patch.object(
-            rm.threading, "Thread", ThreadFalsa
-        ):
+            rm.psutil,
+            "virtual_memory",
+            return_value=SimpleNamespace(available=123),
+        ), mock.patch.object(rm.threading, "Thread", ThreadFalsa):
             monitor = rm.MonitorRecursos(relogio=lambda: 1.0)
             monitor.iniciar()
 
         self.assertEqual(python.chamadas_cpu, [None])
+        self.assertEqual(monitor._memoria_disponivel_inicial, 123)
         self.assertTrue(monitor._thread.iniciada)
         monitor._desregistrar()
 
@@ -461,6 +464,47 @@ class MonitorRecursosTest(unittest.TestCase):
         self.assertAlmostEqual(resultado["ram_media_python_mb"], 200 / 1024**2)
         self.assertAlmostEqual(resultado["ram_media_total_mb"], 500 / 1024**2)
         self.assertAlmostEqual(resultado["ram_pico_total_mb"], 700 / 1024**2)
+
+    def test_memoria_disponivel_registra_inicial_e_maior_reducao(self) -> None:
+        python = ProcessoFalso(10, nome="python.exe", cpu=[5.0, 6.0])
+        mb = 1024 * 1024
+        relogio = mock.Mock(side_effect=[1.0, 2.0])
+        with mock.patch.object(rm.psutil, "Process", return_value=python), mock.patch.object(
+            rm.psutil,
+            "virtual_memory",
+            side_effect=[SimpleNamespace(available=120 * mb), SimpleNamespace(available=80 * mb)],
+        ):
+            monitor = rm.MonitorRecursos(relogio=relogio)
+            monitor._memoria_disponivel_inicial = 100 * mb
+            monitor._ultimo_instante = 0.0
+            monitor._registrar_amostra()
+            monitor._registrar_amostra()
+
+        for amostra in monitor._amostras:
+            amostra["cpu_postgres_convencional"] = False
+
+        self.assertEqual(monitor._amostras[-1]["memoria_disponivel"], 80 * mb)
+        resultado = monitor._consolidar()
+        self.assertEqual(resultado["memoria_disponivel_inicial_mb"], 100.0)
+        self.assertEqual(resultado["memoria_disponivel_reducao_maxima_mb"], 20.0)
+
+    def test_reducao_de_memoria_disponivel_e_zero_quando_nao_ha_reducao(self) -> None:
+        python = ProcessoFalso(10, nome="python.exe", cpu=[5.0])
+        mb = 1024 * 1024
+        with mock.patch.object(rm.psutil, "Process", return_value=python), mock.patch.object(
+            rm.psutil,
+            "virtual_memory",
+            return_value=SimpleNamespace(available=120 * mb),
+        ):
+            monitor = rm.MonitorRecursos()
+            monitor._memoria_disponivel_inicial = 100 * mb
+            monitor._ultimo_instante = 0.0
+            monitor._registrar_amostra()
+
+        monitor._amostras[-1]["cpu_postgres_convencional"] = False
+
+        resultado = monitor._consolidar()
+        self.assertEqual(resultado["memoria_disponivel_reducao_maxima_mb"], 0.0)
 
     def test_consolidacao_ignora_amostras_de_ram_incompletas(self) -> None:
         python = ProcessoFalso(10, nome="python.exe")

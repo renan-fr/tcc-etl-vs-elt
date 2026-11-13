@@ -81,7 +81,8 @@ class MonitorRecursos:
         self._ultimo_instante_postgres: float | None = None
         self._erro_thread: BaseException | None = None
         self._lock = threading.RLock()
-        self._resultado: dict[str, float] | None = None
+        self._resultado: dict[str, float | None] | None = None
+        self._memoria_disponivel_inicial: int | None = None
 
     def iniciar(self) -> None:
         global _monitor_ativo
@@ -91,6 +92,7 @@ class MonitorRecursos:
             _monitor_ativo = self
         try:
             self._parar.clear()
+            self._memoria_disponivel_inicial = self._ler_memoria_disponivel()
             self._processo_python.cpu_percent(interval=None)
             self._ultimo_instante = self._relogio()
             self._thread = threading.Thread(target=self._coletar, daemon=True)
@@ -166,7 +168,7 @@ class MonitorRecursos:
                 self._ultimo_instante = fronteira
                 self._ultimo_instante_postgres = fronteira
 
-    def parar(self) -> dict[str, float]:
+    def parar(self) -> dict[str, float | None]:
         if self._resultado is not None:
             return dict(self._resultado)
         self._parar.set()
@@ -302,6 +304,15 @@ class MonitorRecursos:
             ) from erro
 
     @staticmethod
+    def _ler_memoria_disponivel() -> int:
+        try:
+            return int(psutil.virtual_memory().available)
+        except (AttributeError, psutil.Error) as erro:
+            raise ErroMonitoramentoRecursos(
+                "Memoria disponivel do sistema nao esta disponivel."
+            ) from erro
+
+    @staticmethod
     def _ler_ram_postgres(
         processo: psutil.Process,
         identidade_esperada: tuple[int, float],
@@ -358,11 +369,14 @@ class MonitorRecursos:
             if self._ultimo_instante is None:
                 self._ultimo_instante = agora
                 return
+            if self._memoria_disponivel_inicial is None:
+                self._memoria_disponivel_inicial = self._ler_memoria_disponivel()
             duracao = agora - self._ultimo_instante
             if duracao <= 0:
                 raise ErroMonitoramentoRecursos("Intervalo de amostragem de CPU invalido.")
 
             novos = self._descobrir_e_inicializar_processos()
+            memoria_disponivel = self._ler_memoria_disponivel()
             cpu_python = self._ler_cpu(self._processo_python, "Python")
             ram_python = self._ler_ram_python(self._processo_python)
 
@@ -443,13 +457,14 @@ class MonitorRecursos:
                     ),
                     "cpu_total": cpu_total,
                     "ram_total": float(ram_total) if ram_total is not None else None,
+                    "memoria_disponivel": float(memoria_disponivel),
                 }
             )
             self._ultimo_instante = agora
             if self._ultimo_instante_postgres is not None:
                 self._ultimo_instante_postgres = agora
 
-    def _consolidar(self) -> dict[str, float]:
+    def _consolidar(self) -> dict[str, float | None]:
         def cpu(chave: str, pico: bool = False) -> float:
             chave_duracao = f"duracao_{chave}"
             if chave in {"cpu_postgres", "cpu_total"} and not any(
@@ -490,6 +505,22 @@ class MonitorRecursos:
             return max(valores) if pico else sum(valores) / len(valores)
 
         mb = 1024 * 1024
+        memoria_disponivel = [
+            float(amostra["memoria_disponivel"])
+            for amostra in self._amostras
+            if amostra.get("memoria_disponivel") is not None
+        ]
+        reducao_memoria_disponivel_mb = None
+        memoria_disponivel_inicial_mb = None
+        if self._memoria_disponivel_inicial is not None and memoria_disponivel:
+            memoria_disponivel_inicial_mb = self._memoria_disponivel_inicial / mb
+            reducao_memoria_disponivel_mb = max(
+                0.0,
+                max(
+                    self._memoria_disponivel_inicial - valor
+                    for valor in memoria_disponivel
+                ) / mb,
+            )
         return {
             "cpu_media_python": cpu("cpu_python"),
             "cpu_pico_python": cpu("cpu_python", pico=True),
@@ -503,4 +534,6 @@ class MonitorRecursos:
             "cpu_pico_total": cpu("cpu_total", pico=True),
             "ram_media_total_mb": ram("ram_total") / mb,
             "ram_pico_total_mb": ram("ram_total", pico=True) / mb,
+            "memoria_disponivel_inicial_mb": memoria_disponivel_inicial_mb,
+            "memoria_disponivel_reducao_maxima_mb": reducao_memoria_disponivel_mb,
         }

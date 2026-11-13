@@ -50,6 +50,7 @@ CAMPOS_RECURSOS = (
     "ram_pico_python_mb", "cpu_media_postgres", "cpu_pico_postgres",
     "ram_media_postgres_mb", "ram_pico_postgres_mb", "cpu_media_total",
     "cpu_pico_total", "ram_media_total_mb", "ram_pico_total_mb",
+    "memoria_disponivel_inicial_mb", "memoria_disponivel_reducao_maxima_mb",
 )
 
 
@@ -90,6 +91,8 @@ class ResultadoBenchmark:
     cpu_pico_total: float | None
     ram_media_total_mb: float | None
     ram_pico_total_mb: float | None
+    memoria_disponivel_inicial_mb: float | None
+    memoria_disponivel_reducao_maxima_mb: float | None
     quantidade_registros: int
     linhas_participantes: int
     linhas_resultados: int

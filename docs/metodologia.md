@@ -572,6 +572,14 @@ memória privada ou zero.
 O mesmo procedimento de monitoramento será aplicado a todos os cenários da
 modalidade `recursos`. O intervalo permanecerá fixo em 0,5 segundo.
 
+Como indicador complementar, o monitor registrará `psutil.virtual_memory().available`
+no início da execução e em cada amostra. O CSV da modalidade `recursos` conterá
+`memoria_disponivel_inicial_mb` para diagnóstico e
+`memoria_disponivel_reducao_maxima_mb`, calculado como a maior diferença entre o
+valor inicial e uma amostra posterior, em MB. A métrica não será limitada a
+zero: caso a memória disponível não fique abaixo do valor inicial, será
+registrado `0`.
+
 ---
 
 ## 8. Repetições
@@ -849,6 +857,8 @@ cpu_media_total
 cpu_pico_total
 ram_media_total_mb
 ram_pico_total_mb
+memoria_disponivel_inicial_mb
+memoria_disponivel_reducao_maxima_mb
 timestamp
 ```
 
@@ -895,6 +905,10 @@ vazios. CPU e RAM da modalidade `recursos`, coletadas a cada 0,5 segundo, são a
 métricas oficiais de recursos. Os tempos e throughput das execuções monitoradas
 continuam registrados somente para diagnóstico. A proveniência oficial e
 diagnóstica fica declarada em `campanha.json`.
+
+Os campos de memória disponível do sistema também permanecem nos CSVs de
+`recursos` como indicadores complementares para diagnóstico e não alteram as
+métricas de USS.
 
 Na análise estatística, a modalidade `desempenho` consolidará `tempo_total` e
 `throughput`, podendo apresentar os tempos por etapa como indicadores
