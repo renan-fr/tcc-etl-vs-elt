@@ -425,6 +425,7 @@ class MonitorRecursos:
             # arvore da instancia. Um processo encerrado durante USS
             # invalida a amostra, nunca e convertido em zero.
             ram_postgres: int | None = 0
+            ram_postgres_convencional = not self._postgres_vinculado
             ram_postgres_incompleta = False
             if self._postgres_vinculado:
                 for identidade, processo in list(self._processos_postgres.items()):
@@ -455,6 +456,7 @@ class MonitorRecursos:
                     "ram_postgres": (
                         float(ram_postgres) if ram_postgres is not None else None
                     ),
+                    "ram_postgres_convencional": ram_postgres_convencional,
                     "cpu_total": cpu_total,
                     "ram_total": float(ram_total) if ram_total is not None else None,
                     "memoria_disponivel": float(memoria_disponivel),
@@ -492,11 +494,22 @@ class MonitorRecursos:
             tempo = sum(duracao for _, duracao in valores)
             return sum(valor * duracao for valor, duracao in valores) / tempo
 
-        def ram(chave: str, pico: bool = False) -> float:
+        def ram(
+            chave: str,
+            pico: bool = False,
+            *,
+            somente_leituras_reais: bool = False,
+        ) -> float:
             valores = [
                 float(amostra[chave])
                 for amostra in self._amostras
-                if amostra[chave] is not None
+                if (
+                    amostra[chave] is not None
+                    and (
+                        not somente_leituras_reais
+                        or not amostra.get("ram_postgres_convencional", False)
+                    )
+                )
             ]
             if not valores:
                 raise ErroMonitoramentoRecursos(
@@ -528,7 +541,9 @@ class MonitorRecursos:
             "ram_pico_python_mb": ram("ram_python", pico=True) / mb,
             "cpu_media_postgres": cpu("cpu_postgres"),
             "cpu_pico_postgres": cpu("cpu_postgres", pico=True),
-            "ram_media_postgres_mb": ram("ram_postgres") / mb,
+            "ram_media_postgres_mb": ram(
+                "ram_postgres", somente_leituras_reais=True
+            ) / mb,
             "ram_pico_postgres_mb": ram("ram_postgres", pico=True) / mb,
             "cpu_media_total": cpu("cpu_total"),
             "cpu_pico_total": cpu("cpu_total", pico=True),

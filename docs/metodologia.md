@@ -534,9 +534,13 @@ USS Python.
 
 Depois da primeira vinculação, o PostgreSQL permanece participante até o final
 da execução, inclusive entre conexões posteriores. A média de PostgreSQL é a
-média aritmética das amostras e inclui os zeros convencionais anteriores à
-primeira conexão. O pico é o maior valor observado. A mesma regra de média e
-pico é aplicada à RAM Python e à RAM total.
+média aritmética somente das amostras válidas de USS obtidas depois da primeira
+vinculação. Assim, os zeros anteriores à conexão são identificados como
+convencionais e não reduzem `ram_media_postgres_mb`; um valor USS igual a zero
+obtido em uma leitura real posterior continua incluído. Se não houver nenhuma
+leitura real válida de USS do PostgreSQL, a consolidação falha explicitamente,
+sem fabricar uma média. O pico continua sendo o maior valor observado, e a
+mesma regra de média e pico é aplicada à RAM Python e à RAM total.
 
 O consumo total do sistema operacional não será utilizado como referência, pois
 poderia incluir processos externos ao experimento.

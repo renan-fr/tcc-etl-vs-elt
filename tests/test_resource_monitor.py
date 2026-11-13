@@ -116,6 +116,7 @@ class MonitorRecursosTest(unittest.TestCase):
         self.assertEqual(amostra["duracao_cpu_total"], 1.0)
         self.assertEqual(amostra["ram_python"], 123.0)
         self.assertEqual(amostra["ram_postgres"], 0.0)
+        self.assertTrue(amostra["ram_postgres_convencional"])
         self.assertEqual(amostra["ram_total"], 123.0)
 
     def test_vinculo_prima_postgres_e_novo_processo_sem_contar_primeira_leitura(self) -> None:
@@ -482,6 +483,7 @@ class MonitorRecursosTest(unittest.TestCase):
 
         for amostra in monitor._amostras:
             amostra["cpu_postgres_convencional"] = False
+            amostra["ram_postgres_convencional"] = False
 
         self.assertEqual(monitor._amostras[-1]["memoria_disponivel"], 80 * mb)
         resultado = monitor._consolidar()
@@ -502,6 +504,7 @@ class MonitorRecursosTest(unittest.TestCase):
             monitor._registrar_amostra()
 
         monitor._amostras[-1]["cpu_postgres_convencional"] = False
+        monitor._amostras[-1]["ram_postgres_convencional"] = False
 
         resultado = monitor._consolidar()
         self.assertEqual(resultado["memoria_disponivel_reducao_maxima_mb"], 0.0)
@@ -532,7 +535,7 @@ class MonitorRecursosTest(unittest.TestCase):
         self.assertAlmostEqual(resultado["ram_media_total_mb"], 700 / 1024**2)
         self.assertAlmostEqual(resultado["ram_pico_total_mb"], 700 / 1024**2)
 
-    def test_media_e_pico_incluem_amostras_pre_e_pos_conexao(self) -> None:
+    def test_media_postgres_exclui_zero_convencional_mas_preserva_zero_real(self) -> None:
         python = ProcessoFalso(10, nome="python.exe")
         with mock.patch.object(rm.psutil, "Process", return_value=python):
             monitor = rm.MonitorRecursos()
@@ -542,27 +545,57 @@ class MonitorRecursosTest(unittest.TestCase):
                 "duracao_cpu_total": 1.0, "cpu_python": 10.0,
                 "cpu_postgres": 0.0, "cpu_postgres_convencional": True,
                 "cpu_total": 10.0,
-                "ram_python": 100.0, "ram_postgres": 0.0, "ram_total": 100.0,
+                "ram_python": 100.0, "ram_postgres": 0.0,
+                "ram_postgres_convencional": True, "ram_total": 100.0,
             },
             {
                 "duracao_cpu_python": 1.0, "duracao_cpu_postgres": 1.0,
                 "duracao_cpu_total": 1.0, "cpu_python": 20.0,
                 "cpu_postgres": 30.0, "cpu_postgres_convencional": False,
                 "cpu_total": 50.0,
-                "ram_python": 300.0, "ram_postgres": 400.0, "ram_total": 700.0,
+                "ram_python": 300.0, "ram_postgres": 0.0,
+                "ram_postgres_convencional": False, "ram_total": 300.0,
+            },
+            {
+                "duracao_cpu_python": 1.0, "duracao_cpu_postgres": 1.0,
+                "duracao_cpu_total": 1.0, "cpu_python": 20.0,
+                "cpu_postgres": 30.0, "cpu_postgres_convencional": False,
+                "cpu_total": 50.0,
+                "ram_python": 300.0, "ram_postgres": 400.0,
+                "ram_postgres_convencional": False, "ram_total": 700.0,
             },
         ]
 
         resultado = monitor._consolidar()
 
-        self.assertEqual(resultado["cpu_media_python"], 15.0)
-        self.assertEqual(resultado["cpu_media_postgres"], 15.0)
-        self.assertEqual(resultado["cpu_media_total"], 30.0)
+        self.assertAlmostEqual(resultado["cpu_media_python"], 50 / 3)
+        self.assertEqual(resultado["cpu_media_postgres"], 20.0)
+        self.assertAlmostEqual(resultado["cpu_media_total"], 110 / 3)
         self.assertEqual(resultado["cpu_pico_total"], 50.0)
         self.assertAlmostEqual(resultado["ram_media_postgres_mb"], 200 / 1024**2)
         self.assertAlmostEqual(resultado["ram_pico_postgres_mb"], 400 / 1024**2)
-        self.assertAlmostEqual(resultado["ram_media_total_mb"], 400 / 1024**2)
+        self.assertAlmostEqual(resultado["ram_media_total_mb"], 1100 / 3 / 1024**2)
         self.assertAlmostEqual(resultado["ram_pico_total_mb"], 700 / 1024**2)
+
+    def test_media_postgres_falha_explicitamente_sem_leitura_real(self) -> None:
+        python = ProcessoFalso(10, nome="python.exe")
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos()
+        monitor._amostras = [
+            {
+                "duracao_cpu_python": 1.0, "duracao_cpu_postgres": 1.0,
+                "duracao_cpu_total": 1.0, "cpu_python": 10.0,
+                "cpu_postgres": 0.0, "cpu_postgres_convencional": False,
+                "cpu_total": 10.0, "ram_python": 100.0,
+                "ram_postgres": 0.0, "ram_postgres_convencional": True,
+                "ram_total": 100.0,
+            }
+        ]
+
+        with self.assertRaisesRegex(
+            rm.ErroMonitoramentoRecursos, "Nenhuma leitura valida.*ram_postgres"
+        ):
+            monitor._consolidar()
 
     def test_conexao_no_final_preserva_cpu_python_no_agregado(self) -> None:
         python = ProcessoFalso(10, nome="python.exe")
