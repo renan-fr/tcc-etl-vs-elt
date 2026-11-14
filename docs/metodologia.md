@@ -578,6 +578,23 @@ continuam no CSV bruto e são contabilizadas separadamente por estado, sem
 substituição de ausências por zero. As estatísticas das métricas oficiais de
 CPU percentual, USS e memória disponível permanecem inalteradas.
 
+Na campanha oficial, serão mantidas cinco rodadas por combinação de dataset,
+volume e arquitetura, sem repetições automáticas ou seletivas destinadas a
+substituir resultados parciais de `cpu_times`. Todas as execuções serão
+preservadas nos CSVs brutos, inclusive as parciais e as que não tenham leituras
+válidas. A média, a mediana e o desvio-padrão de `cpu_times` serão calculados
+exclusivamente com observações de status `valida`. Um status parcial nessa
+métrica não invalida automaticamente CPU percentual, RAM ou as demais métricas
+da mesma execução.
+
+A cobertura de `cpu_times` será analisada por dataset, volume e arquitetura,
+com a contagem de execuções completas e incompletas e a verificação de eventual
+desequilíbrio entre ETL e ELT. Quando a cobertura for insuficiente, as
+conclusões serão limitadas, sem forçar comparações. Não se estabelece de
+antemão um limite numérico de suficiência; portanto, não será inventado um
+percentual mínimo nem alegada posteriormente uma suficiência estatística não
+predefinida.
+
 ### Memória RAM
 
 A métrica de memória será a USS (*Unique Set Size*), obtida homogeneamente para
