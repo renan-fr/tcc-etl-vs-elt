@@ -49,6 +49,19 @@ def linhas_resultado_benchmark(resultado: Any) -> list[str]:
             f"RAM USS pico: "
             f"{_formatar_recurso(resultado, f'ram_pico_{sufixo}_mb', ' MB')}"
         )
+    status_cpu_times = (
+        resultado.cpu_times_status
+        if resultado.monitoramento_ativo and resultado.cpu_times_status
+        else "não monitorado"
+    )
+    linhas.append(
+        "Tempo acumulado de CPU (cpu_times) | "
+        f"Python: {_formatar_recurso(resultado, 'cpu_times_python_s', 's')} | "
+        f"PostgreSQL: "
+        f"{_formatar_recurso(resultado, 'cpu_times_postgres_s', 's')} | "
+        f"Total: {_formatar_recurso(resultado, 'cpu_times_total_s', 's')} | "
+        f"Status: {status_cpu_times}"
+    )
     return linhas
 
 

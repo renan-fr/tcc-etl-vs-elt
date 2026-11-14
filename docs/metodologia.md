@@ -519,11 +519,16 @@ um processo novo não reaproveita o contador de uma identidade antiga.
 
 O resultado pode ser consultado por
 `MonitorRecursos.consolidar_cpu_times_experimental()`. Ele é deliberadamente
-separado de `_consolidar()`: não substitui `cpu_percent()`, não altera o
-resultado retornado por `parar()`, não cria campos nos CSVs e não é consumido
-pelos pipelines ou pela análise estatística. O resultado experimental também
-expõe uma integração aproximada de `cpu_percent / 100 * duração` para
-comparação de coerência, além de contagens e um status de validade.
+separado de `_consolidar()`: não substitui `cpu_percent()` nem altera as
+métricas oficiais retornadas por `parar()`. Os quatro pipelines acrescentam
+`cpu_times_python_s`, `cpu_times_postgres_s`, `cpu_times_total_s` e
+`cpu_times_status` aos CSVs de recursos depois da mesma amostra final usada
+pelos indicadores oficiais. As contagens de leituras válidas e de processos
+novos, encerrados ou incompletos também são preservadas como diagnóstico. Os
+campos ficam vazios na modalidade de desempenho e não participam das métricas
+de desempenho. O resultado experimental ainda expõe internamente uma
+integração aproximada de `cpu_percent / 100 * duração` para comparação de
+coerência; `cpu_times` e `cpu_percent` permanecem medidas distintas.
 
 Há limitações importantes. Se um processo encerrar entre duas leituras, o
 consumo ocorrido depois da última leitura não pode ser recuperado; a medição é
@@ -545,8 +550,17 @@ registradas; `parcial_ha_processos_incompletos` indica que houve alguma perda
 de leitura ou processo encerrado sem consumo final recuperável;
 `parcial_ha_componentes_sem_deltas` indica que um dos componentes não possui
 delta válido, mesmo que o outro possua; e `sem_leituras_validas` indica que
-nenhum delta foi validado. Em qualquer estado parcial ou insuficiente,
-`cpu_times_total_s` permanece nulo.
+nenhum delta foi validado. Quando falta o delta de um componente,
+`cpu_times_total_s` permanece nulo. Em
+`parcial_ha_processos_incompletos`, o total dos deltas efetivamente observados
+pode estar presente, mas continua sendo parcial e não representa cobertura
+completa.
+
+Na análise estatística, somente linhas com `cpu_times_status=valida` entram nas
+estatísticas de tempo acumulado de CPU. Linhas parciais ou sem leituras
+continuam no CSV bruto e são contabilizadas separadamente por estado, sem
+substituição de ausências por zero. As estatísticas das métricas oficiais de
+CPU percentual, USS e memória disponível permanecem inalteradas.
 
 ### Memória RAM
 

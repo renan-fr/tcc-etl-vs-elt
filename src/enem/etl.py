@@ -28,9 +28,17 @@ from psycopg2 import sql
 from dotenv import load_dotenv
 
 try:
-    from src.resource_monitor import MonitorRecursos, vincular_conexao_postgres
+    from src.resource_monitor import (
+        CAMPOS_CPU_TIMES_SAIDA,
+        MonitorRecursos,
+        vincular_conexao_postgres,
+    )
 except ModuleNotFoundError:
-    from resource_monitor import MonitorRecursos, vincular_conexao_postgres
+    from resource_monitor import (
+        CAMPOS_CPU_TIMES_SAIDA,
+        MonitorRecursos,
+        vincular_conexao_postgres,
+    )
 try:
     from src.benchmark_output import (
         imprimir_resultado_benchmark,
@@ -51,7 +59,7 @@ CAMPOS_RECURSOS = (
     "ram_media_postgres_mb", "ram_pico_postgres_mb", "cpu_media_total",
     "cpu_pico_total", "ram_media_total_mb", "ram_pico_total_mb",
     "memoria_disponivel_inicial_mb", "memoria_disponivel_reducao_maxima_mb",
-)
+) + CAMPOS_CPU_TIMES_SAIDA
 
 
 @dataclass(frozen=True)
@@ -93,6 +101,16 @@ class ResultadoBenchmark:
     ram_pico_total_mb: float | None
     memoria_disponivel_inicial_mb: float | None
     memoria_disponivel_reducao_maxima_mb: float | None
+    cpu_times_python_s: float | None
+    cpu_times_postgres_s: float | None
+    cpu_times_total_s: float | None
+    cpu_times_status: str | None
+    cpu_times_leituras_validas: int | None
+    cpu_times_leituras_validas_python: int | None
+    cpu_times_leituras_validas_postgres: int | None
+    cpu_times_processos_novos: int | None
+    cpu_times_processos_encerrados: int | None
+    cpu_times_processos_incompletos: int | None
     quantidade_registros: int
     linhas_participantes: int
     linhas_resultados: int
@@ -1039,7 +1057,7 @@ def _salvar_resultado_benchmark(
     linha_formatada = {"run_id": os.environ["BENCHMARK_RUN_ID"]}
     for campo, valor in resultado.__dict__.items():
         if isinstance(valor, float):
-            casas = 3 if campo.startswith("tempo_") else 2
+            casas = 3 if campo.startswith(("tempo_", "cpu_times_")) else 2
             valor = round(valor, casas)
         linha_formatada[campo] = valor
     validar_execucao_inedita(caminho, linha_formatada)
@@ -1073,7 +1091,7 @@ def _finalizar_benchmark(
         return
 
     recursos = (
-        monitor.parar()
+        monitor.parar_com_cpu_times()
         if monitor is not None
         else {campo: None for campo in CAMPOS_RECURSOS}
     )

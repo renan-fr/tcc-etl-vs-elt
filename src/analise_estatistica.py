@@ -43,6 +43,26 @@ OPTIONAL_RESOURCE_METRICS = (
     "cpu_media_python", "cpu_pico_python", "ram_media_python_mb", "ram_pico_python_mb",
     "cpu_media_postgres", "cpu_pico_postgres", "ram_media_postgres_mb", "ram_pico_postgres_mb",
 )
+CPU_TIMES_METRICS = (
+    "cpu_times_python_s",
+    "cpu_times_postgres_s",
+    "cpu_times_total_s",
+)
+CPU_TIMES_STATUS_FIELD = "cpu_times_status"
+CPU_TIMES_STATUSES = (
+    "valida",
+    "parcial_ha_processos_incompletos",
+    "parcial_ha_componentes_sem_deltas",
+    "sem_leituras_validas",
+)
+CPU_TIMES_DIAGNOSTIC_FIELDS = (
+    "cpu_times_leituras_validas",
+    "cpu_times_leituras_validas_python",
+    "cpu_times_leituras_validas_postgres",
+    "cpu_times_processos_novos",
+    "cpu_times_processos_encerrados",
+    "cpu_times_processos_incompletos",
+)
 
 
 class AnaliseError(ValueError):
@@ -60,6 +80,17 @@ def _numero(valor: str | None, campo: str, arquivo: Path, linha: int) -> float:
     if not math.isfinite(numero):
         raise AnaliseError(f"{arquivo}:{linha}: valor numérico inválido em {campo}: {valor!r}")
     return numero
+
+
+def _numero_opcional(
+    valor: str | None,
+    campo: str,
+    arquivo: Path,
+    linha: int,
+) -> float | None:
+    if valor is None or not valor.strip():
+        return None
+    return _numero(valor, campo, arquivo, linha)
 
 
 def _metadados_campanha(campanha: Path, run_id: str) -> tuple[frozenset[str], frozenset[int]]:
@@ -153,9 +184,37 @@ def _ler_modalidade(campanha: Path, modalidade: str, run_id: str) -> list[dict[s
                         if metrica in campos
                     )
                     metricas = tuple(RESOURCE_METRIC_ALIASES) + disponiveis
+                    cpu_times_presentes = tuple(
+                        campo
+                        for campo in (
+                            *CPU_TIMES_METRICS,
+                            CPU_TIMES_STATUS_FIELD,
+                        )
+                        if campo in campos
+                    )
+                    if cpu_times_presentes and len(cpu_times_presentes) != 4:
+                        raise AnaliseError(
+                            f"{arquivo}: esquema de cpu_times incompleto"
+                        )
+                    diagnosticos_presentes = tuple(
+                        campo
+                        for campo in CPU_TIMES_DIAGNOSTIC_FIELDS
+                        if campo in campos
+                    )
+                    if diagnosticos_presentes and len(diagnosticos_presentes) != len(
+                        CPU_TIMES_DIAGNOSTIC_FIELDS
+                    ):
+                        raise AnaliseError(
+                            f"{arquivo}: diagnósticos de cpu_times incompletos"
+                        )
+                    esquema_recursos = (
+                        *metricas,
+                        *cpu_times_presentes,
+                        *diagnosticos_presentes,
+                    )
                     if metricas_recursos is None:
-                        metricas_recursos = metricas
-                    elif metricas != metricas_recursos:
+                        metricas_recursos = esquema_recursos
+                    elif esquema_recursos != metricas_recursos:
                         raise AnaliseError(f"{arquivo}: esquema de métricas de recursos inconsistente")
                 for metrica in metricas:
                     campo = metrica
@@ -177,6 +236,39 @@ def _ler_modalidade(campanha: Path, modalidade: str, run_id: str) -> list[dict[s
                             valor = _numero(bruto.get(metrica), metrica, arquivo, numero_linha)
                             if valor <= 0:
                                 raise AnaliseError(f"{arquivo}:{numero_linha}: {metrica} deve ser positivo")
+                    if CPU_TIMES_STATUS_FIELD in campos:
+                        status = (bruto.get(CPU_TIMES_STATUS_FIELD) or "").strip()
+                        if status not in CPU_TIMES_STATUSES:
+                            raise AnaliseError(
+                                f"{arquivo}:{numero_linha}: status de cpu_times inválido: "
+                                f"{status!r}"
+                            )
+                        registro[CPU_TIMES_STATUS_FIELD] = status
+                        for metrica in CPU_TIMES_METRICS:
+                            valor = _numero_opcional(
+                                bruto.get(metrica), metrica, arquivo, numero_linha
+                            )
+                            if status == "valida" and valor is None:
+                                raise AnaliseError(
+                                    f"{arquivo}:{numero_linha}: medição válida exige {metrica}"
+                                )
+                            if valor is not None and valor < 0:
+                                raise AnaliseError(
+                                    f"{arquivo}:{numero_linha}: {metrica} não pode ser negativo"
+                                )
+                            registro[metrica] = valor
+                        for campo in CPU_TIMES_DIAGNOSTIC_FIELDS:
+                            if campo not in campos:
+                                continue
+                            valor = _numero(
+                                bruto.get(campo), campo, arquivo, numero_linha
+                            )
+                            if valor < 0 or not valor.is_integer():
+                                raise AnaliseError(
+                                    f"{arquivo}:{numero_linha}: {campo} deve ser "
+                                    "inteiro não negativo"
+                                )
+                            registro[campo] = int(valor)
                 registros.append(registro)
     return registros
 
@@ -237,6 +329,56 @@ def _agrupar(registros: list[dict[str, object]], metricas: tuple[str, ...]) -> l
     return saida
 
 
+def _agrupar_recursos(
+    registros: list[dict[str, object]],
+    metricas: tuple[str, ...],
+) -> list[dict[str, object]]:
+    saida = _agrupar(registros, metricas)
+    if CPU_TIMES_STATUS_FIELD not in registros[0]:
+        return saida
+    grupos: dict[tuple[str, int, str], list[dict[str, object]]] = {}
+    for registro in registros:
+        chave = (
+            str(registro["dataset"]),
+            int(registro["volume_configurado"]),
+            str(registro["arquitetura"]),
+        )
+        grupos.setdefault(chave, []).append(registro)
+    por_chave = {
+        (linha["dataset"], linha["volume_configurado"], linha["arquitetura"]): linha
+        for linha in saida
+    }
+    for chave, itens in grupos.items():
+        linha = por_chave[chave]
+        validos = [
+            item
+            for item in itens
+            if item[CPU_TIMES_STATUS_FIELD] == "valida"
+        ]
+        linha["cpu_times_n_validas"] = len(validos)
+        linha["cpu_times_n_nao_validas"] = len(itens) - len(validos)
+        for status in CPU_TIMES_STATUSES:
+            linha[f"cpu_times_status_{status}_n"] = sum(
+                item[CPU_TIMES_STATUS_FIELD] == status for item in itens
+            )
+        for metrica in CPU_TIMES_METRICS:
+            valores = [float(item[metrica]) for item in validos]
+            if not valores:
+                media = desvio = mediana = None
+            else:
+                media = statistics.fmean(valores)
+                desvio = statistics.stdev(valores) if len(valores) > 1 else None
+                mediana = statistics.median(valores)
+            linha.update(
+                {
+                    f"{metrica}_media": media,
+                    f"{metrica}_desvio_padrao": desvio,
+                    f"{metrica}_mediana": mediana,
+                }
+            )
+    return saida
+
+
 def _comparar(desempenho: list[dict[str, object]]) -> list[dict[str, object]]:
     agrupado = _agrupar(desempenho, ("tempo_total",))
     por_chave = {(r["dataset"], r["volume_configurado"], r["arquitetura"]): r for r in agrupado}
@@ -290,7 +432,7 @@ def analisar_campanha(run_id: str, base_dir: Path | None = None) -> Path:
     _validar_completude(recursos, "recursos", datasets_esperados, volumes_esperados)
     saidas = {
         "analise_desempenho.csv": _agrupar(desempenho, PERFORMANCE_METRICS + DIAGNOSTIC_TIME_METRICS),
-        "analise_recursos.csv": _agrupar(
+        "analise_recursos.csv": _agrupar_recursos(
             recursos,
             tuple(RESOURCE_METRIC_ALIASES)
             + tuple(metrica for metrica in OPTIONAL_RESOURCE_METRICS if metrica in recursos[0]),

@@ -682,6 +682,32 @@ class MonitorRecursosTest(unittest.TestCase):
         self.assertEqual(resultado["cpu_times_leituras_validas"], 6)
         self.assertEqual(resultado["cpu_times_status"], "valida")
 
+    def test_parar_com_cpu_times_preserva_oficiais_e_anexa_diagnosticos(self) -> None:
+        python = ProcessoFalso(10, nome="python.exe")
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos()
+        monitor._cpu_times_acumulado_python = 1.25
+        monitor._cpu_times_acumulado_postgres = 2.5
+        monitor._cpu_times_leituras_validas = 2
+        monitor._cpu_times_leituras_validas_python = 1
+        monitor._cpu_times_leituras_validas_postgres = 1
+
+        with mock.patch.object(
+            monitor, "parar", return_value={"cpu_media_python": 50.0}
+        ) as parar:
+            resultado = monitor.parar_com_cpu_times()
+
+        parar.assert_called_once_with()
+        self.assertEqual(resultado["cpu_media_python"], 50.0)
+        self.assertEqual(resultado["cpu_times_python_s"], 1.25)
+        self.assertEqual(resultado["cpu_times_postgres_s"], 2.5)
+        self.assertEqual(resultado["cpu_times_total_s"], 3.75)
+        self.assertEqual(resultado["cpu_times_status"], "valida")
+        self.assertEqual(
+            set(resultado) - {"cpu_media_python"},
+            set(rm.CAMPOS_CPU_TIMES_SAIDA),
+        )
+
     def test_cpu_times_processo_novo_comeca_na_fronteira_e_encerramento_e_incompleto(self) -> None:
         python = ProcessoFalso(
             10, nome="python.exe", cpu_times=[(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]

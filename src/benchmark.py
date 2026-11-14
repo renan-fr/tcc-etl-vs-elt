@@ -443,6 +443,20 @@ def main() -> None:
                 "monitoramento_ativo": True,
                 "intervalo_monitoramento_s": 0.5,
                 "metricas_oficiais": ["cpu_*", "ram_*"],
+                "metricas_experimentais": [
+                    "cpu_times_python_s",
+                    "cpu_times_postgres_s",
+                    "cpu_times_total_s",
+                    "cpu_times_status",
+                ],
+                "diagnosticos_cpu_times": [
+                    "cpu_times_leituras_validas",
+                    "cpu_times_leituras_validas_python",
+                    "cpu_times_leituras_validas_postgres",
+                    "cpu_times_processos_novos",
+                    "cpu_times_processos_encerrados",
+                    "cpu_times_processos_incompletos",
+                ],
                 "metricas_diagnosticas": [
                     "tempo_leitura",
                     "tempo_transformacao",

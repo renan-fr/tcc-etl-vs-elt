@@ -17,6 +17,20 @@ from typing import Any, Callable
 import psutil
 
 
+CAMPOS_CPU_TIMES_SAIDA = (
+    "cpu_times_python_s",
+    "cpu_times_postgres_s",
+    "cpu_times_total_s",
+    "cpu_times_status",
+    "cpu_times_leituras_validas",
+    "cpu_times_leituras_validas_python",
+    "cpu_times_leituras_validas_postgres",
+    "cpu_times_processos_novos",
+    "cpu_times_processos_encerrados",
+    "cpu_times_processos_incompletos",
+)
+
+
 class ErroMonitoramentoRecursos(RuntimeError):
     """Falha que torna uma medicao de recursos invalida."""
 
@@ -454,6 +468,20 @@ class MonitorRecursos:
                 ) + int(self._cpu_times_python_incompleto),
                 "cpu_times_status": status,
             }
+
+    def parar_com_cpu_times(self) -> dict[str, float | int | None | str]:
+        """Finaliza a coleta oficial e anexa o diagnóstico experimental.
+
+        A ordem preserva a fronteira final de ``parar()``. Os cálculos de
+        ``cpu_times`` continuam exclusivamente em
+        ``consolidar_cpu_times_experimental()``.
+        """
+        resultado: dict[str, float | int | None | str] = self.parar()
+        experimental = self.consolidar_cpu_times_experimental()
+        resultado.update(
+            {campo: experimental[campo] for campo in CAMPOS_CPU_TIMES_SAIDA}
+        )
+        return resultado
 
     def _integrar_cpu_percent_experimental(self) -> tuple[float, float, float]:
         python = 0.0
