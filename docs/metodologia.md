@@ -530,6 +530,12 @@ de desempenho. O resultado experimental ainda expõe internamente uma
 integração aproximada de `cpu_percent / 100 * duração` para comparação de
 coerência; `cpu_times` e `cpu_percent` permanecem medidas distintas.
 
+As conexões PostgreSQL vinculadas permanecem referenciadas pelo monitor até a
+amostra final. Primeiro são lidos e consolidados os contadores; somente depois
+as conexões são fechadas. Isso preserva o backend da conexão na fronteira final
+sem executar SQL adicional, introduzir espera artificial ou alterar os
+cronômetros e commits dos pipelines.
+
 Há limitações importantes. Se um processo encerrar entre duas leituras, o
 consumo ocorrido depois da última leitura não pode ser recuperado; a medição é
 marcada como parcial. Um processo que surge só é contabilizado a partir da
@@ -543,6 +549,16 @@ registrada como incompleta; uma leitura posterior pode estabelecer nova
 referência e gerar deltas futuros, mas não torna o histórico plenamente
 válido. A integração de percentuais é apenas aproximada, pois usa as janelas e
 regras da coleta de `cpu_percent()`.
+
+O diagnóstico interno distingue processo encerrado, acesso negado, contador
+inválido ou não finito, regressão e reutilização de PID, sempre associado à
+identidade `(PID, tempo de criação)`. Em `AccessDenied`, uma única tentativa
+imediata pode ser feita depois de revalidar essa identidade. Falhas
+intermediárias também podem ser recuperadas por uma leitura monotônica posterior
+que cubra todo o intervalo desde o último baseline válido. Perdas não
+recuperáveis continuam parciais. A contagem de processos encerrados inclui
+somente desaparecimento confirmado ou substituição confirmada da identidade;
+os detalhes por PID permanecem internos e não ampliam os CSVs oficiais.
 
 Os estados da consolidação experimental têm a seguinte semântica: `valida`
 exige pelo menos um delta válido de Python e um de PostgreSQL, sem perdas

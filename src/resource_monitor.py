@@ -7,6 +7,7 @@ numero de CPUs e aplicada.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import ipaddress
 import math
 import socket
@@ -15,6 +16,13 @@ import time
 from typing import Any, Callable
 
 import psutil
+
+
+@dataclass(frozen=True)
+class _LeituraCpuTimes:
+    valor: tuple[float, float] | None
+    causa: str | None = None
+    recuperada: bool = False
 
 
 CAMPOS_CPU_TIMES_SAIDA = (
@@ -85,10 +93,12 @@ class MonitorRecursos:
         self.intervalo_segundos = intervalo_segundos
         self._relogio = relogio
         self._processo_python = psutil.Process()
+        self._identidade_python = self._identidade(self._processo_python)
         self._parar = threading.Event()
         self._thread: threading.Thread | None = None
         self._amostras: list[dict[str, float | bool | None]] = []
         self._processos_postgres: dict[tuple[int, float], psutil.Process] = {}
+        self._conexoes_postgres: list[Any] = []
         self._raiz_postgres: psutil.Process | None = None
         self._identidade_raiz: tuple[int, float] | None = None
         self._postgres_vinculado = False
@@ -109,8 +119,11 @@ class MonitorRecursos:
         self._cpu_times_leituras_validas_python = 0
         self._cpu_times_leituras_validas_postgres = 0
         self._cpu_times_python_incompleto = False
+        self._cpu_times_python_falha_pendente: str | None = None
         self._cpu_times_processos_incompletos: set[tuple[int, float]] = set()
         self._cpu_times_processos_ja_encerrados: set[tuple[int, float]] = set()
+        self._cpu_times_falhas_pendentes: dict[tuple[int, float], str] = {}
+        self._cpu_times_diagnosticos: list[dict[str, object]] = []
         self._cpu_times_processos_novos = 0
         self._cpu_times_processos_encerrados = 0
 
@@ -194,6 +207,10 @@ class MonitorRecursos:
             self._raiz_postgres = raiz
             self._identidade_raiz = self._identidade(raiz)
             self._descobrir_e_inicializar_processos()
+            if not any(existente is conexao for existente in self._conexoes_postgres):
+                # Mantem o backend vivo ate a amostra final. O monitor fecha as
+                # conexoes somente depois de consolidar os contadores.
+                self._conexoes_postgres.append(conexao)
             self._postgres_vinculado = True
             if primeira_vinculacao:
                 self._processo_python.cpu_percent(interval=None)
@@ -207,6 +224,7 @@ class MonitorRecursos:
         self._parar.set()
         if self._thread is not None:
             self._thread.join()
+        erro_principal: BaseException | None = None
         try:
             if self._erro_thread is not None:
                 raise ErroMonitoramentoRecursos(
@@ -215,8 +233,16 @@ class MonitorRecursos:
             self._registrar_amostra()
             self._resultado = self._consolidar()
             return dict(self._resultado)
+        except BaseException as erro:
+            erro_principal = erro
+            raise
         finally:
+            erro_fechamento = self._fechar_conexoes_postgres()
             self._desregistrar()
+            if erro_principal is None and erro_fechamento is not None:
+                raise ErroMonitoramentoRecursos(
+                    "Falha ao fechar conexao PostgreSQL depois da amostra final."
+                ) from erro_fechamento
 
     def _desregistrar(self) -> None:
         global _monitor_ativo
@@ -224,10 +250,26 @@ class MonitorRecursos:
             if _monitor_ativo is self:
                 _monitor_ativo = None
 
+    def _fechar_conexoes_postgres(self) -> BaseException | None:
+        conexoes = self._conexoes_postgres
+        self._conexoes_postgres = []
+        primeiro_erro: BaseException | None = None
+        for conexao in conexoes:
+            fechar = getattr(conexao, "close", None)
+            if not callable(fechar):
+                continue
+            try:
+                fechar()
+            except BaseException as erro:
+                if primeiro_erro is None:
+                    primeiro_erro = erro
+        return primeiro_erro
+
     def _abortar(self) -> None:
         self._parar.set()
         if self._thread is not None:
             self._thread.join()
+        self._fechar_conexoes_postgres()
         self._desregistrar()
 
     def _coletar(self) -> None:
@@ -304,8 +346,12 @@ class MonitorRecursos:
                 ):
                     self._processos_postgres.pop(identidade_antiga)
                     self._cpu_times_postgres_anteriores.pop(identidade_antiga, None)
+                    self._cpu_times_falhas_pendentes.pop(identidade_antiga, None)
                     self._cpu_times_processos_incompletos.add(identidade_antiga)
                     self._cpu_times_processos_encerrados += 1
+                    self._registrar_diagnostico_cpu_times(
+                        identidade_antiga, "pid_reutilizado", "descoberta"
+                    )
             self._processos_postgres[identidade] = processo
             self._inicializar_cpu_times_postgres(identidade, processo)
             novos.add(identidade)
@@ -339,6 +385,49 @@ class MonitorRecursos:
         except (AttributeError, TypeError, ValueError):
             return None
 
+    def _ler_cpu_times_diagnosticada(
+        self,
+        processo: psutil.Process,
+        rotulo: str,
+        identidade_esperada: tuple[int, float] | None = None,
+    ) -> _LeituraCpuTimes:
+        def ler(alvo: psutil.Process) -> _LeituraCpuTimes:
+            try:
+                tempos = alvo.cpu_times()
+                user = float(tempos.user)
+                system = float(tempos.system)
+                if not math.isfinite(user) or not math.isfinite(system):
+                    return _LeituraCpuTimes(None, "contador_nao_finito")
+                return _LeituraCpuTimes((user, system))
+            except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                return _LeituraCpuTimes(None, "processo_encerrado")
+            except psutil.AccessDenied:
+                return _LeituraCpuTimes(None, "acesso_negado")
+            except (AttributeError, TypeError, ValueError):
+                return _LeituraCpuTimes(None, "contador_invalido")
+
+        primeira = ler(processo)
+        if primeira.causa != "acesso_negado" or identidade_esperada is None:
+            return primeira
+
+        # Uma unica tentativa imediata e permitida. Antes dela, a identidade
+        # precisa ser revalidada para nunca combinar contadores de PIDs
+        # reutilizados.
+        try:
+            processo_atual = psutil.Process(identidade_esperada[0])
+            identidade_atual = self._identidade(processo_atual)
+        except (psutil.NoSuchProcess, psutil.ZombieProcess):
+            return _LeituraCpuTimes(None, "processo_encerrado")
+        except psutil.AccessDenied:
+            return _LeituraCpuTimes(None, "acesso_negado")
+        if identidade_atual != identidade_esperada:
+            return _LeituraCpuTimes(None, "pid_reutilizado")
+
+        segunda = ler(processo_atual)
+        if segunda.valor is None:
+            return segunda
+        return _LeituraCpuTimes(segunda.valor, recuperada=True)
+
     @staticmethod
     def _delta_cpu_times(
         anterior: tuple[float, float] | None,
@@ -358,53 +447,161 @@ class MonitorRecursos:
         delta = delta_user + delta_system
         return delta if math.isfinite(delta) else None
 
+    @staticmethod
+    def _delta_cpu_times_diagnosticado(
+        anterior: tuple[float, float] | None,
+        atual: tuple[float, float] | None,
+    ) -> tuple[float | None, str | None]:
+        if anterior is None:
+            return None, "sem_baseline"
+        if atual is None:
+            return None, "leitura_indisponivel"
+        delta_user = atual[0] - anterior[0]
+        delta_system = atual[1] - anterior[1]
+        if not math.isfinite(delta_user) or not math.isfinite(delta_system):
+            return None, "delta_nao_finito"
+        if delta_user < 0 or delta_system < 0:
+            return None, "regressao_contador"
+        delta = delta_user + delta_system
+        if not math.isfinite(delta):
+            return None, "delta_nao_finito"
+        return delta, None
+
+    def _registrar_diagnostico_cpu_times(
+        self,
+        identidade: tuple[int, float],
+        causa: str,
+        fase: str,
+    ) -> None:
+        self._cpu_times_diagnosticos.append(
+            {
+                "pid": identidade[0],
+                "create_time": identidade[1],
+                "causa": causa,
+                "fase": fase,
+            }
+        )
+
+    def diagnosticos_cpu_times_experimental(self) -> list[dict[str, object]]:
+        """Detalhes internos; deliberadamente fora dos CSVs de benchmark."""
+        with self._lock:
+            return [dict(item) for item in self._cpu_times_diagnosticos]
+
     def _inicializar_cpu_times_postgres(
         self,
         identidade: tuple[int, float],
         processo: psutil.Process,
     ) -> None:
         """Estabelece a fronteira do processo novo sem contar CPU anterior."""
-        atual = self._ler_cpu_times(processo, "PostgreSQL")
-        self._cpu_times_postgres_anteriores[identidade] = atual
+        leitura = self._ler_cpu_times_diagnosticada(
+            processo, "PostgreSQL", identidade
+        )
+        self._cpu_times_postgres_anteriores[identidade] = leitura.valor
         self._cpu_times_processos_novos += 1
-        if atual is None:
+        if leitura.recuperada:
+            self._registrar_diagnostico_cpu_times(
+                identidade, "acesso_negado_recuperado", "baseline"
+            )
+        if leitura.valor is None:
             self._cpu_times_processos_incompletos.add(identidade)
+            causa = leitura.causa or "leitura_indisponivel"
+            self._registrar_diagnostico_cpu_times(identidade, causa, "baseline")
+            if causa in {"processo_encerrado", "pid_reutilizado"}:
+                self._cpu_times_processos_encerrados += 1
+                self._cpu_times_processos_ja_encerrados.add(identidade)
 
     def _registrar_cpu_times_amostra(
         self,
         novos: set[tuple[int, float]],
     ) -> None:
         """Acumula deltas uma vez por amostra, mantendo identidades PID/create_time."""
-        atual_python = self._ler_cpu_times(self._processo_python, "Python")
-        delta_python = self._delta_cpu_times(
-            self._cpu_times_python_anterior, atual_python
+        leitura_python = self._ler_cpu_times_diagnosticada(
+            self._processo_python, "Python", self._identidade_python
         )
-        if delta_python is not None:
-            self._cpu_times_acumulado_python += delta_python
-            self._cpu_times_leituras_validas += 1
-            self._cpu_times_leituras_validas_python += 1
-        elif delta_python is None:
-            self._cpu_times_python_incompleto = True
-        self._cpu_times_python_anterior = atual_python
+        if leitura_python.recuperada:
+            self._registrar_diagnostico_cpu_times(
+                self._identidade_python, "acesso_negado_recuperado", "amostra"
+            )
+        if leitura_python.valor is not None:
+            delta_python, causa_delta = self._delta_cpu_times_diagnosticado(
+                self._cpu_times_python_anterior, leitura_python.valor
+            )
+            if delta_python is not None:
+                self._cpu_times_acumulado_python += delta_python
+                self._cpu_times_leituras_validas += 1
+                self._cpu_times_leituras_validas_python += 1
+                if self._cpu_times_python_falha_pendente is not None:
+                    self._registrar_diagnostico_cpu_times(
+                        self._identidade_python,
+                        self._cpu_times_python_falha_pendente + "_recuperado",
+                        "amostra",
+                    )
+                    self._cpu_times_python_falha_pendente = None
+            else:
+                self._cpu_times_python_incompleto = True
+                self._registrar_diagnostico_cpu_times(
+                    self._identidade_python,
+                    causa_delta or "delta_invalido",
+                    "delta",
+                )
+            self._cpu_times_python_anterior = leitura_python.valor
+        else:
+            causa = leitura_python.causa or "leitura_indisponivel"
+            self._cpu_times_python_falha_pendente = causa
+            self._registrar_diagnostico_cpu_times(
+                self._identidade_python, causa, "amostra"
+            )
 
         for identidade, processo in list(self._processos_postgres.items()):
             if identidade in novos or identidade in self._cpu_times_processos_ja_encerrados:
                 continue
-            atual = self._ler_cpu_times(processo, "PostgreSQL")
+            leitura = self._ler_cpu_times_diagnosticada(
+                processo, "PostgreSQL", identidade
+            )
+            if leitura.recuperada:
+                self._registrar_diagnostico_cpu_times(
+                    identidade, "acesso_negado_recuperado", "amostra"
+                )
             anterior = self._cpu_times_postgres_anteriores.get(identidade)
-            delta = self._delta_cpu_times(anterior, atual)
-            if delta is not None:
-                self._cpu_times_acumulado_postgres += delta
-                self._cpu_times_leituras_validas += 1
-                self._cpu_times_leituras_validas_postgres += 1
+            if leitura.valor is not None:
+                delta, causa_delta = self._delta_cpu_times_diagnosticado(
+                    anterior, leitura.valor
+                )
+                if delta is not None:
+                    self._cpu_times_acumulado_postgres += delta
+                    self._cpu_times_leituras_validas += 1
+                    self._cpu_times_leituras_validas_postgres += 1
+                    pendente = self._cpu_times_falhas_pendentes.pop(
+                        identidade, None
+                    )
+                    if pendente is not None:
+                        self._registrar_diagnostico_cpu_times(
+                            identidade, pendente + "_recuperado", "amostra"
+                        )
+                else:
+                    self._cpu_times_processos_incompletos.add(identidade)
+                    self._cpu_times_falhas_pendentes.pop(identidade, None)
+                    self._registrar_diagnostico_cpu_times(
+                        identidade,
+                        causa_delta or "delta_invalido",
+                        "delta",
+                    )
+                self._cpu_times_postgres_anteriores[identidade] = leitura.valor
             else:
-                self._cpu_times_processos_incompletos.add(identidade)
-                if atual is None:
+                causa = leitura.causa or "leitura_indisponivel"
+                if causa in {"processo_encerrado", "pid_reutilizado"}:
+                    self._cpu_times_processos_incompletos.add(identidade)
                     self._cpu_times_processos_encerrados += 1
                     self._cpu_times_postgres_anteriores.pop(identidade, None)
+                    self._cpu_times_falhas_pendentes.pop(identidade, None)
                     self._cpu_times_processos_ja_encerrados.add(identidade)
-                    continue
-            self._cpu_times_postgres_anteriores[identidade] = atual
+                elif identidade not in self._cpu_times_falhas_pendentes:
+                    # O baseline anterior e preservado: uma leitura futura
+                    # monotona recupera integralmente o delta atravessado.
+                    self._cpu_times_falhas_pendentes[identidade] = causa
+                self._registrar_diagnostico_cpu_times(
+                    identidade, causa, "amostra"
+                )
 
     def consolidar_cpu_times_experimental(
         self,
@@ -434,9 +631,16 @@ class MonitorRecursos:
             )
             tem_leitura_python = self._cpu_times_leituras_validas_python > 0
             tem_leitura_postgres = self._cpu_times_leituras_validas_postgres > 0
-            ha_incompletudes = bool(
+            identidades_incompletas = (
                 self._cpu_times_processos_incompletos
-                or self._cpu_times_python_incompleto
+                | set(self._cpu_times_falhas_pendentes)
+            )
+            python_incompleto = bool(
+                self._cpu_times_python_incompleto
+                or self._cpu_times_python_falha_pendente is not None
+            )
+            ha_incompletudes = bool(
+                identidades_incompletas or python_incompleto
             )
             if ha_incompletudes:
                 status = "parcial_ha_processos_incompletos"
@@ -463,9 +667,8 @@ class MonitorRecursos:
                 ),
                 "cpu_times_processos_novos": self._cpu_times_processos_novos,
                 "cpu_times_processos_encerrados": self._cpu_times_processos_encerrados,
-                "cpu_times_processos_incompletos": len(
-                    self._cpu_times_processos_incompletos
-                ) + int(self._cpu_times_python_incompleto),
+                "cpu_times_processos_incompletos": len(identidades_incompletas)
+                + int(python_incompleto),
                 "cpu_times_status": status,
             }
 
