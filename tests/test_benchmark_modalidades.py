@@ -148,6 +148,19 @@ class MatrizEOrquestradorTest(unittest.TestCase):
             "tempo_total",
             metadados["modalidades"]["recursos"]["metricas_diagnosticas"],
         )
+        self.assertEqual(
+            metadados["modalidades"]["recursos"]["metricas_experimentais"],
+            [
+                "cpu_times_python_s",
+                "cpu_times_postgres_s",
+                "cpu_times_total_s",
+                "cpu_times_status",
+            ],
+        )
+        self.assertIn(
+            "cpu_times_processos_incompletos",
+            metadados["modalidades"]["recursos"]["diagnosticos_cpu_times"],
+        )
 
     def test_campanha_completa_simulada_tem_um_aquecimento_e_cinco_rodadas(self) -> None:
         with tempfile.TemporaryDirectory() as temporario:
@@ -401,7 +414,7 @@ class MonitorESerializacaoTest(unittest.TestCase):
 
             with self.subTest(modulo=modulo.__name__):
                 self.assertEqual(asdict(resultado), antes)
-                self.assertEqual("\n".join(linhas).count("não monitorado"), 12)
+                self.assertEqual("\n".join(linhas).count("não monitorado"), 16)
                 self.assertIn("Tempo total: 1.000s", linhas)
                 self.assertIn("Throughput: 1.00 registros/s", linhas)
 
@@ -409,6 +422,12 @@ class MonitorESerializacaoTest(unittest.TestCase):
         modulo = PIPELINES[0]
         base = resultado_sem_recursos(modulo)
         valores = {campo: 12.345 for campo in modulo.CAMPOS_RECURSOS}
+        valores["cpu_times_status"] = "valida"
+        for campo in modulo.CAMPOS_RECURSOS:
+            if campo.startswith("cpu_times_leituras_") or campo.startswith(
+                "cpu_times_processos_"
+            ):
+                valores[campo] = 1
         monitorado = modulo.ResultadoBenchmark(
             **{
                 campo.name: (
@@ -427,13 +446,18 @@ class MonitorESerializacaoTest(unittest.TestCase):
             "RAM USS média: 12.35 MB | RAM USS pico: 12.35 MB",
             linhas,
         )
+        self.assertIn(
+            "Tempo acumulado de CPU (cpu_times) | Python: 12.35s | "
+            "PostgreSQL: 12.35s | Total: 12.35s | Status: valida",
+            linhas,
+        )
 
         desativado = replace(monitorado, monitoramento_ativo=False)
         self.assertEqual(
             "\n".join(linhas_resultado_benchmark(desativado)).count(
                 "não monitorado"
             ),
-            12,
+            16,
         )
 
         sem_cpu_python = replace(monitorado, cpu_media_python=None)
@@ -485,12 +509,80 @@ class MonitorESerializacaoTest(unittest.TestCase):
                 for campo in modulo.CAMPOS_RECURSOS:
                     self.assertEqual(linha[campo], "")
 
+    def test_cpu_times_validos_e_parciais_sao_serializados_nos_quatro_pipelines(self) -> None:
+        campos_oficiais_anteriores = (
+            "cpu_media_python", "cpu_pico_python", "ram_media_python_mb",
+            "ram_pico_python_mb", "cpu_media_postgres", "cpu_pico_postgres",
+            "ram_media_postgres_mb", "ram_pico_postgres_mb", "cpu_media_total",
+            "cpu_pico_total", "ram_media_total_mb", "ram_pico_total_mb",
+            "memoria_disponivel_inicial_mb",
+            "memoria_disponivel_reducao_maxima_mb",
+        )
+        for modulo in PIPELINES:
+            salvar = (
+                getattr(modulo, "_salvar_resultado_benchmark", None)
+                or getattr(modulo, "salvar_benchmark", None)
+                or getattr(modulo, "_salvar_benchmark")
+            )
+            base = resultado_sem_recursos(modulo)
+            diagnosticos = {
+                "cpu_times_leituras_validas": 20,
+                "cpu_times_leituras_validas_python": 10,
+                "cpu_times_leituras_validas_postgres": 10,
+                "cpu_times_processos_novos": 3,
+                "cpu_times_processos_encerrados": 0,
+                "cpu_times_processos_incompletos": 0,
+            }
+            valido = replace(
+                base,
+                modalidade="recursos",
+                monitoramento_ativo=True,
+                intervalo_monitoramento_s=0.5,
+                cpu_times_python_s=1.25,
+                cpu_times_postgres_s=2.5,
+                cpu_times_total_s=3.75,
+                cpu_times_status="valida",
+                **diagnosticos,
+            )
+            parcial = replace(
+                valido,
+                rodada=2,
+                cpu_times_postgres_s=None,
+                cpu_times_total_s=None,
+                cpu_times_status="parcial_ha_componentes_sem_deltas",
+                cpu_times_leituras_validas_postgres=0,
+            )
+            with self.subTest(modulo=modulo.__name__), tempfile.TemporaryDirectory() as temporario:
+                caminho = Path(temporario) / "recursos" / "resultado.csv"
+                with mock.patch.dict(os.environ, {"BENCHMARK_RUN_ID": "teste"}):
+                    salvar(valido, caminho)
+                    salvar(parcial, caminho)
+                with caminho.open(encoding="utf-8-sig", newline="") as arquivo:
+                    linhas = list(csv.DictReader(arquivo, delimiter=";"))
+                self.assertEqual(
+                    modulo.CAMPOS_RECURSOS[: len(campos_oficiais_anteriores)],
+                    campos_oficiais_anteriores,
+                )
+                self.assertEqual(linhas[0]["cpu_times_status"], "valida")
+                self.assertEqual(linhas[0]["cpu_times_total_s"].replace(",", "."), "3.75")
+                self.assertEqual(
+                    linhas[1]["cpu_times_status"],
+                    "parcial_ha_componentes_sem_deltas",
+                )
+                self.assertEqual(linhas[1]["cpu_times_postgres_s"], "")
+                self.assertEqual(linhas[1]["cpu_times_total_s"], "")
+                self.assertEqual(
+                    linhas[1]["cpu_times_leituras_validas_postgres"], "0"
+                )
+
 
 class EquivalenciaFluxoTest(unittest.TestCase):
     @staticmethod
     def _monitor(modulo):
         monitor = mock.Mock()
-        monitor.parar.return_value = {campo: 1.0 for campo in modulo.CAMPOS_RECURSOS}
+        valores = {campo: 1.0 for campo in modulo.CAMPOS_RECURSOS}
+        valores["cpu_times_status"] = "valida"
+        monitor.parar_com_cpu_times.return_value = valores
         return monitor
 
     def _fluxo_enem_etl(self, monitorar: bool) -> list[str]:

@@ -11,16 +11,36 @@ IDENTITY = ["run_id", "modalidade", "dataset", "volume_configurado", "arquitetur
 RESOURCE = ["cpu_media_total", "cpu_pico_total", "ram_media_total_mb", "ram_pico_total_mb"]
 PERFORMANCE = ["tempo_total", "throughput", "tempo_leitura", "tempo_transformacao", "tempo_carga"]
 SEPARATED_RESOURCE = ["cpu_media_python", "cpu_pico_python", "ram_media_python_mb", "ram_pico_python_mb", "cpu_media_postgres", "cpu_pico_postgres", "ram_media_postgres_mb", "ram_pico_postgres_mb"]
+CPU_TIMES = [
+    "cpu_times_python_s", "cpu_times_postgres_s", "cpu_times_total_s",
+    "cpu_times_status", "cpu_times_leituras_validas",
+    "cpu_times_leituras_validas_python",
+    "cpu_times_leituras_validas_postgres", "cpu_times_processos_novos",
+    "cpu_times_processos_encerrados", "cpu_times_processos_incompletos",
+]
 
 
 class TestAnaliseEstatistica(unittest.TestCase):
-    def _criar_campanha(self, raiz: Path, rodadas=range(1, 6), volumes=(100000,), separated=False) -> Path:
+    def _criar_campanha(
+        self,
+        raiz: Path,
+        rodadas=range(1, 6),
+        volumes=(100000,),
+        separated=False,
+        cpu_times_statuses: dict[int, str] | None = None,
+    ) -> Path:
         campanha = raiz / "campanha_teste"
         for modalidade in ("desempenho", "recursos"):
             (campanha / modalidade).mkdir(parents=True)
             for dataset in ("enem", "tse"):
                 for arquitetura in ("etl", "elt"):
-                    campos = IDENTITY + (PERFORMANCE if modalidade == "desempenho" else RESOURCE + (SEPARATED_RESOURCE if separated else []))
+                    campos = IDENTITY + (
+                        PERFORMANCE
+                        if modalidade == "desempenho"
+                        else RESOURCE
+                        + (SEPARATED_RESOURCE if separated else [])
+                        + (CPU_TIMES if cpu_times_statuses is not None else [])
+                    )
                     caminho = campanha / modalidade / f"{dataset}_{arquitetura}.csv"
                     with caminho.open("w", encoding="utf-8", newline="") as arquivo:
                         escritor = csv.DictWriter(arquivo, fieldnames=campos, delimiter=";")
@@ -37,6 +57,20 @@ class TestAnaliseEstatistica(unittest.TestCase):
                                 linha.update(cpu_media_total="10", cpu_pico_total="20", ram_media_total_mb="30", ram_pico_total_mb="40")
                                 if separated:
                                     linha.update(cpu_media_python="1", cpu_pico_python="2", ram_media_python_mb="3", ram_pico_python_mb="4", cpu_media_postgres="5", cpu_pico_postgres="6", ram_media_postgres_mb="7", ram_pico_postgres_mb="8")
+                                if cpu_times_statuses is not None:
+                                    status = cpu_times_statuses[rodada]
+                                    linha.update(
+                                        cpu_times_python_s=("1" if status != "sem_leituras_validas" else ""),
+                                        cpu_times_postgres_s=("2" if status == "valida" else ""),
+                                        cpu_times_total_s=("3" if status == "valida" else ""),
+                                        cpu_times_status=status,
+                                        cpu_times_leituras_validas=(2 if status == "valida" else 1 if status.startswith("parcial") else 0),
+                                        cpu_times_leituras_validas_python=(1 if status != "sem_leituras_validas" else 0),
+                                        cpu_times_leituras_validas_postgres=(1 if status == "valida" else 0),
+                                        cpu_times_processos_novos=2,
+                                        cpu_times_processos_encerrados=0,
+                                        cpu_times_processos_incompletos=(1 if status == "parcial_ha_processos_incompletos" else 0),
+                                    )
                             escritor.writerow(linha)
         (campanha / "campanha.json").write_text(json.dumps({
             "run_id": "campanha_teste",
@@ -209,6 +243,92 @@ class TestAnaliseEstatistica(unittest.TestCase):
                 escritor.writerows(linhas)
             with self.assertRaisesRegex(AnaliseError, "cpu_media_total não pode ser negativo"):
                 analisar_campanha("campanha_teste", Path(temporario))
+
+    def test_cpu_times_agrega_somente_validas_e_conta_estados_parciais(self):
+        statuses = {
+            1: "valida",
+            2: "parcial_ha_componentes_sem_deltas",
+            3: "valida",
+            4: "sem_leituras_validas",
+            5: "valida",
+        }
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = self._criar_campanha(
+                Path(temporario),
+                separated=True,
+                cpu_times_statuses=statuses,
+            )
+            destino = analisar_campanha("campanha_teste", Path(temporario))
+            with (destino / "analise_recursos.csv").open(
+                encoding="utf-8", newline=""
+            ) as arquivo:
+                linha = next(csv.DictReader(arquivo, delimiter=";"))
+
+            self.assertEqual(linha["n_execucoes"], "5")
+            self.assertEqual(linha["cpu_times_n_validas"], "3")
+            self.assertEqual(linha["cpu_times_n_nao_validas"], "2")
+            self.assertEqual(
+                linha["cpu_times_status_parcial_ha_componentes_sem_deltas_n"],
+                "1",
+            )
+            self.assertEqual(linha["cpu_times_status_sem_leituras_validas_n"], "1")
+            self.assertEqual(linha["cpu_times_total_s_media"], "3,0")
+            self.assertEqual(linha["cpu_times_total_s_mediana"], "3,0")
+            self.assertEqual(linha["cpu_times_total_s_desvio_padrao"], "0,0")
+
+    def test_cpu_times_valida_exige_valores_e_parcial_preserva_total_sem_agregar(self):
+        statuses = {rodada: "valida" for rodada in range(1, 6)}
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = self._criar_campanha(
+                Path(temporario), cpu_times_statuses=statuses
+            )
+            caminho = campanha / "recursos" / "enem_etl.csv"
+            with caminho.open(encoding="utf-8", newline="") as arquivo:
+                linhas = list(csv.DictReader(arquivo, delimiter=";"))
+                campos = list(linhas[0])
+            linhas[0]["cpu_times_total_s"] = ""
+            with caminho.open("w", encoding="utf-8", newline="") as arquivo:
+                escritor = csv.DictWriter(arquivo, fieldnames=campos, delimiter=";")
+                escritor.writeheader()
+                escritor.writerows(linhas)
+            with self.assertRaisesRegex(AnaliseError, "medição válida exige"):
+                analisar_campanha("campanha_teste", Path(temporario))
+
+            linhas[0]["cpu_times_status"] = "parcial_ha_processos_incompletos"
+            linhas[0]["cpu_times_total_s"] = "3"
+            with caminho.open("w", encoding="utf-8", newline="") as arquivo:
+                escritor = csv.DictWriter(arquivo, fieldnames=campos, delimiter=";")
+                escritor.writeheader()
+                escritor.writerows(linhas)
+            destino = analisar_campanha("campanha_teste", Path(temporario))
+            with (destino / "analise_recursos.csv").open(
+                encoding="utf-8", newline=""
+            ) as arquivo:
+                agregada = next(
+                    linha
+                    for linha in csv.DictReader(arquivo, delimiter=";")
+                    if linha["dataset"] == "enem"
+                    and linha["arquitetura"] == "etl"
+                )
+            self.assertEqual(agregada["cpu_times_n_validas"], "4")
+            self.assertEqual(agregada["cpu_times_n_nao_validas"], "1")
+
+    def test_cpu_times_sem_leituras_nao_vira_zero_na_analise(self):
+        statuses = {rodada: "sem_leituras_validas" for rodada in range(1, 6)}
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = self._criar_campanha(
+                Path(temporario), cpu_times_statuses=statuses
+            )
+            destino = analisar_campanha("campanha_teste", Path(temporario))
+            with (destino / "analise_recursos.csv").open(
+                encoding="utf-8", newline=""
+            ) as arquivo:
+                linha = next(csv.DictReader(arquivo, delimiter=";"))
+            self.assertEqual(linha["cpu_times_n_validas"], "0")
+            self.assertEqual(linha["cpu_times_n_nao_validas"], "5")
+            self.assertEqual(linha["cpu_times_total_s_media"], "")
+            self.assertEqual(linha["cpu_times_total_s_desvio_padrao"], "")
+            self.assertEqual(linha["cpu_times_total_s_mediana"], "")
 
 
 if __name__ == "__main__":
