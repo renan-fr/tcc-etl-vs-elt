@@ -89,6 +89,7 @@ class TestAnaliseEstatistica(unittest.TestCase):
             self.assertEqual(float(etl["tempo_total_media"].replace(",", ".")), 4.0)
             self.assertAlmostEqual(float(etl["tempo_total_desvio_padrao"].replace(",", ".")), 1.5811, places=3)
             self.assertEqual(float(etl["tempo_total_mediana"].replace(",", ".")), 4.0)
+            self.assertAlmostEqual(float(etl["tempo_total_cv"].replace(",", ".")), 39.52847075, places=5)
             with (destino / "comparacao_etl_elt.csv").open(encoding="utf-8", newline="") as arquivo:
                 comparacao = next(csv.DictReader(arquivo, delimiter=";"))
             self.assertAlmostEqual(float(comparacao["variacao_tempo_pct"].replace(",", ".")), 25.0, places=3)
@@ -122,7 +123,44 @@ class TestAnaliseEstatistica(unittest.TestCase):
             recurso = next(l for l in recursos if l["arquitetura"] == "etl")
             self.assertEqual(recurso["cpu_media_python_media"], "1,0")
             self.assertEqual(recurso["ram_pico_postgres_mb_mediana"], "8,0")
+            self.assertEqual(recurso["cpu_media_cv"], "0,0")
             self.assertEqual({p: p.read_bytes() for p in originais}, originais)
+
+    def test_cv_fica_indisponivel_para_media_zero(self):
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = self._criar_campanha(Path(temporario))
+            caminho = campanha / "recursos" / "enem_etl.csv"
+            with caminho.open(encoding="utf-8", newline="") as arquivo:
+                linhas = list(csv.DictReader(arquivo, delimiter=";"))
+                campos = list(linhas[0])
+            for linha in linhas:
+                linha["cpu_media_total"] = "0"
+            with caminho.open("w", encoding="utf-8", newline="") as arquivo:
+                escritor = csv.DictWriter(arquivo, fieldnames=campos, delimiter=";")
+                escritor.writeheader()
+                escritor.writerows(linhas)
+            destino = analisar_campanha("campanha_teste", Path(temporario))
+            with (destino / "analise_recursos.csv").open(encoding="utf-8", newline="") as arquivo:
+                linha = next(
+                    linha for linha in csv.DictReader(arquivo, delimiter=";")
+                    if linha["dataset"] == "enem" and linha["arquitetura"] == "etl"
+                )
+            self.assertEqual(linha["cpu_media_cv"], "")
+
+    def test_cv_fica_indisponivel_com_uma_observacao_cpu_times_valida(self):
+        statuses = {
+            1: "valida",
+            2: "sem_leituras_validas",
+            3: "sem_leituras_validas",
+            4: "sem_leituras_validas",
+            5: "sem_leituras_validas",
+        }
+        with tempfile.TemporaryDirectory() as temporario:
+            self._criar_campanha(Path(temporario), cpu_times_statuses=statuses)
+            destino = analisar_campanha("campanha_teste", Path(temporario))
+            with (destino / "analise_recursos.csv").open(encoding="utf-8", newline="") as arquivo:
+                linha = next(csv.DictReader(arquivo, delimiter=";"))
+            self.assertEqual(linha["cpu_times_total_s_cv"], "")
 
     def test_aquecimento_e_ignorado_mas_rodada_duplicada_falha(self):
         with tempfile.TemporaryDirectory() as temporario:
@@ -275,6 +313,7 @@ class TestAnaliseEstatistica(unittest.TestCase):
             self.assertEqual(linha["cpu_times_total_s_media"], "3,0")
             self.assertEqual(linha["cpu_times_total_s_mediana"], "3,0")
             self.assertEqual(linha["cpu_times_total_s_desvio_padrao"], "0,0")
+            self.assertEqual(linha["cpu_times_total_s_cv"], "0,0")
 
     def test_cpu_times_valida_exige_valores_e_parcial_preserva_total_sem_agregar(self):
         statuses = {rodada: "valida" for rodada in range(1, 6)}

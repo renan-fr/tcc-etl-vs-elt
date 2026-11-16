@@ -309,9 +309,17 @@ def _validar_completude(
         raise AnaliseError("Cenários incompletos:\n" + "\n".join(erros))
 
 
-def _estatisticas(valores: Iterable[float]) -> tuple[float, float, float]:
+def _coeficiente_variacao(media: float, desvio: float | None) -> float | None:
+    if desvio is None or media == 0:
+        return None
+    return (desvio / media) * 100
+
+
+def _estatisticas(valores: Iterable[float]) -> tuple[float, float, float, float | None]:
     lista = list(valores)
-    return statistics.fmean(lista), statistics.stdev(lista), statistics.median(lista)
+    media = statistics.fmean(lista)
+    desvio = statistics.stdev(lista)
+    return media, desvio, statistics.median(lista), _coeficiente_variacao(media, desvio)
 
 
 def _agrupar(registros: list[dict[str, object]], metricas: tuple[str, ...]) -> list[dict[str, object]]:
@@ -323,8 +331,13 @@ def _agrupar(registros: list[dict[str, object]], metricas: tuple[str, ...]) -> l
     for (dataset, volume, arquitetura), itens in sorted(grupos.items()):
         base = {"dataset": dataset, "volume_configurado": volume, "arquitetura": arquitetura, "n_execucoes": len(itens)}
         for metrica in metricas:
-            media, desvio, mediana = _estatisticas(float(item[metrica]) for item in itens)
-            base.update({f"{metrica}_media": media, f"{metrica}_desvio_padrao": desvio, f"{metrica}_mediana": mediana})
+            media, desvio, mediana, cv = _estatisticas(float(item[metrica]) for item in itens)
+            base.update({
+                f"{metrica}_media": media,
+                f"{metrica}_desvio_padrao": desvio,
+                f"{metrica}_mediana": mediana,
+                f"{metrica}_cv": cv,
+            })
         saida.append(base)
     return saida
 
@@ -364,16 +377,18 @@ def _agrupar_recursos(
         for metrica in CPU_TIMES_METRICS:
             valores = [float(item[metrica]) for item in validos]
             if not valores:
-                media = desvio = mediana = None
+                media = desvio = mediana = cv = None
             else:
                 media = statistics.fmean(valores)
                 desvio = statistics.stdev(valores) if len(valores) > 1 else None
                 mediana = statistics.median(valores)
+                cv = _coeficiente_variacao(media, desvio)
             linha.update(
                 {
                     f"{metrica}_media": media,
                     f"{metrica}_desvio_padrao": desvio,
                     f"{metrica}_mediana": mediana,
+                    f"{metrica}_cv": cv,
                 }
             )
     return saida
@@ -401,9 +416,11 @@ def _comparar(desempenho: list[dict[str, object]]) -> list[dict[str, object]]:
             "tempo_total_etl_media": media_etl,
             "tempo_total_etl_desvio_padrao": etl["tempo_total_desvio_padrao"],
             "tempo_total_etl_mediana": etl["tempo_total_mediana"],
+            "tempo_total_etl_cv": etl["tempo_total_cv"],
             "tempo_total_elt_media": elt["tempo_total_media"],
             "tempo_total_elt_desvio_padrao": elt["tempo_total_desvio_padrao"],
             "tempo_total_elt_mediana": elt["tempo_total_mediana"],
+            "tempo_total_elt_cv": elt["tempo_total_cv"],
             "variacao_tempo_pct": variacao,
         })
     return saida
