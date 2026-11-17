@@ -28,9 +28,17 @@ from psycopg2 import sql
 from dotenv import load_dotenv
 
 try:
-    from src.resource_monitor import MonitorRecursos, vincular_conexao_postgres
+    from src.resource_monitor import (
+        CAMPOS_CPU_TIMES_SAIDA,
+        MonitorRecursos,
+        vincular_conexao_postgres,
+    )
 except ModuleNotFoundError:
-    from resource_monitor import MonitorRecursos, vincular_conexao_postgres
+    from resource_monitor import (
+        CAMPOS_CPU_TIMES_SAIDA,
+        MonitorRecursos,
+        vincular_conexao_postgres,
+    )
 try:
     from src.benchmark_output import imprimir_resultado_benchmark
 except ModuleNotFoundError:
@@ -43,7 +51,8 @@ CAMPOS_RECURSOS = (
     "ram_pico_python_mb", "cpu_media_postgres", "cpu_pico_postgres",
     "ram_media_postgres_mb", "ram_pico_postgres_mb", "cpu_media_total",
     "cpu_pico_total", "ram_media_total_mb", "ram_pico_total_mb",
-)
+    "memoria_disponivel_inicial_mb", "memoria_disponivel_reducao_maxima_mb",
+) + CAMPOS_CPU_TIMES_SAIDA
 
 from comum import (
     COLUNAS_CHAVE_ORIGEM,
@@ -145,6 +154,18 @@ class ResultadoBenchmark:
     cpu_pico_total: float | None
     ram_media_total_mb: float | None
     ram_pico_total_mb: float | None
+    memoria_disponivel_inicial_mb: float | None
+    memoria_disponivel_reducao_maxima_mb: float | None
+    cpu_times_python_s: float | None
+    cpu_times_postgres_s: float | None
+    cpu_times_total_s: float | None
+    cpu_times_status: str | None
+    cpu_times_leituras_validas: int | None
+    cpu_times_leituras_validas_python: int | None
+    cpu_times_leituras_validas_postgres: int | None
+    cpu_times_processos_novos: int | None
+    cpu_times_processos_encerrados: int | None
+    cpu_times_processos_incompletos: int | None
     quantidade_registros: int
     linhas_munzona: int
     linhas_secao: int
@@ -681,7 +702,10 @@ def _salvar_benchmark(resultado: ResultadoBenchmark, caminho: Path) -> None:
     linha = {"run_id": os.environ["BENCHMARK_RUN_ID"]}
     for campo, valor in resultado.__dict__.items():
         if isinstance(valor, float):
-            valor = round(valor, 3 if campo.startswith("tempo_") else 2)
+            valor = round(
+                valor,
+                3 if campo.startswith(("tempo_", "cpu_times_")) else 2,
+            )
         linha[campo] = valor
     validar_execucao_inedita(caminho, linha)
     pd.DataFrame([linha]).to_csv(
@@ -750,7 +774,7 @@ def executar(args: argparse.Namespace) -> None:
         return
 
     recursos = (
-        monitor.parar()
+        monitor.parar_com_cpu_times()
         if monitor is not None
         else {campo: None for campo in CAMPOS_RECURSOS}
     )

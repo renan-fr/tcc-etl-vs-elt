@@ -1,6 +1,6 @@
 # Gráficos científicos
 
-Este diretório gera as duas figuras iniciais da subseção 4.1 — Tempo de Processamento — diretamente dos CSVs dos benchmarks. O script usa `tempo_total`, em segundos, e considera apenas as rodadas válidas `1` a `5`. Os aquecimentos não são gravados nos arquivos de resultados e, portanto, não entram nas médias.
+Este diretório gera as três figuras iniciais da subseção 4.1 — Tempo de Processamento — diretamente dos CSVs dos benchmarks. O script usa `tempo_total`, em segundos, e considera apenas as rodadas válidas `1` a `5`. Os aquecimentos não são gravados nos arquivos de resultados e, portanto, não entram nas médias.
 
 ## Dependências
 
@@ -24,7 +24,6 @@ O script lê somente os quatro arquivos em `data/benchmark/campanhas/<run_id>/de
 
 As saídas ficam em `data/benchmark/campanhas/<run_id>/graficos/tempo_processamento/`:
 
-- `tempo_medio_geral.pdf`: média por arquitetura;
 - `tempo_medio_dataset.pdf`: média por conjunto de dados e arquitetura;
 - `tempo_medio_volume_enem.pdf`: linhas de ETL e ELT por volume nominal no ENEM;
 - `tempo_medio_volume_tse.pdf`: linhas de ETL e ELT por volume nominal no TSE.

@@ -507,6 +507,94 @@ são identificados internamente como convencionais e não representam medições
 efetivas iguais a zero; falhas reais de coleta permanecem inválidas e não são
 convertidas em zero.
 
+#### Medição experimental de tempo de CPU acumulado
+
+Na branch experimental `experiment/cpu-times`, o monitor também investiga
+`psutil.Process.cpu_times()`. A métrica soma, em segundos, os deltas de
+`user + system` do processo Python e dos processos PostgreSQL identificados
+pela tupla `(PID, tempo de criação)`. O baseline do Python é estabelecido no
+início do monitoramento; para PostgreSQL, cada processo novo recebe seu
+baseline na descoberta. Assim, CPU anterior ao monitoramento não é contada e
+um processo novo não reaproveita o contador de uma identidade antiga.
+
+O resultado pode ser consultado por
+`MonitorRecursos.consolidar_cpu_times_experimental()`. Ele é deliberadamente
+separado de `_consolidar()`: não substitui `cpu_percent()` nem altera as
+métricas oficiais retornadas por `parar()`. Os quatro pipelines acrescentam
+`cpu_times_python_s`, `cpu_times_postgres_s`, `cpu_times_total_s` e
+`cpu_times_status` aos CSVs de recursos depois da mesma amostra final usada
+pelos indicadores oficiais. As contagens de leituras válidas e de processos
+novos, encerrados ou incompletos também são preservadas como diagnóstico. Os
+campos ficam vazios na modalidade de desempenho e não participam das métricas
+de desempenho. O resultado experimental ainda expõe internamente uma
+integração aproximada de `cpu_percent / 100 * duração` para comparação de
+coerência; `cpu_times` e `cpu_percent` permanecem medidas distintas.
+
+As conexões PostgreSQL vinculadas permanecem referenciadas pelo monitor até a
+amostra final. Primeiro são lidos e consolidados os contadores; somente depois
+as conexões são fechadas. Isso preserva o backend da conexão na fronteira final
+sem executar SQL adicional, introduzir espera artificial ou alterar os
+cronômetros e commits dos pipelines.
+
+Há limitações importantes. Se um processo encerrar entre duas leituras, o
+consumo ocorrido depois da última leitura não pode ser recuperado; a medição é
+marcada como parcial. Um processo que surge só é contabilizado a partir da
+descoberta, portanto seu consumo entre a criação e essa descoberta fica fora
+do acumulado. `AccessDenied`, processo inexistente, contador indisponível ou
+contador que retrocede não produzem delta artificial: a leitura fica inválida
+e o status registra a ausência ou incompletude. A regressão de `user` ou de
+`system` invalida o delta inteiro, mesmo que o outro componente tenha crescido.
+Se a primeira leitura de um processo PostgreSQL falhar, a perda permanece
+registrada como incompleta; uma leitura posterior pode estabelecer nova
+referência e gerar deltas futuros, mas não torna o histórico plenamente
+válido. A integração de percentuais é apenas aproximada, pois usa as janelas e
+regras da coleta de `cpu_percent()`.
+
+O diagnóstico interno distingue processo encerrado, acesso negado, contador
+inválido ou não finito, regressão e reutilização de PID, sempre associado à
+identidade `(PID, tempo de criação)`. Em `AccessDenied`, uma única tentativa
+imediata pode ser feita depois de revalidar essa identidade. Falhas
+intermediárias também podem ser recuperadas por uma leitura monotônica posterior
+que cubra todo o intervalo desde o último baseline válido. Perdas não
+recuperáveis continuam parciais. A contagem de processos encerrados inclui
+somente desaparecimento confirmado ou substituição confirmada da identidade;
+os detalhes por PID permanecem internos e não ampliam os CSVs oficiais.
+
+Os estados da consolidação experimental têm a seguinte semântica: `valida`
+exige pelo menos um delta válido de Python e um de PostgreSQL, sem perdas
+registradas; `parcial_ha_processos_incompletos` indica que houve alguma perda
+de leitura ou processo encerrado sem consumo final recuperável;
+`parcial_ha_componentes_sem_deltas` indica que um dos componentes não possui
+delta válido, mesmo que o outro possua; e `sem_leituras_validas` indica que
+nenhum delta foi validado. Quando falta o delta de um componente,
+`cpu_times_total_s` permanece nulo. Em
+`parcial_ha_processos_incompletos`, o total dos deltas efetivamente observados
+pode estar presente, mas continua sendo parcial e não representa cobertura
+completa.
+
+Na análise estatística, somente linhas com `cpu_times_status=valida` entram nas
+estatísticas de tempo acumulado de CPU. Linhas parciais ou sem leituras
+continuam no CSV bruto e são contabilizadas separadamente por estado, sem
+substituição de ausências por zero. As estatísticas das métricas oficiais de
+CPU percentual, USS e memória disponível permanecem inalteradas.
+
+Na campanha oficial, serão mantidas cinco rodadas por combinação de dataset,
+volume e arquitetura, sem repetições automáticas ou seletivas destinadas a
+substituir resultados parciais de `cpu_times`. Todas as execuções serão
+preservadas nos CSVs brutos, inclusive as parciais e as que não tenham leituras
+válidas. A média, a mediana e o desvio-padrão de `cpu_times` serão calculados
+exclusivamente com observações de status `valida`. Um status parcial nessa
+métrica não invalida automaticamente CPU percentual, RAM ou as demais métricas
+da mesma execução.
+
+A cobertura de `cpu_times` será analisada por dataset, volume e arquitetura,
+com a contagem de execuções completas e incompletas e a verificação de eventual
+desequilíbrio entre ETL e ELT. Quando a cobertura for insuficiente, as
+conclusões serão limitadas, sem forçar comparações. Não se estabelece de
+antemão um limite numérico de suficiência; portanto, não será inventado um
+percentual mínimo nem alegada posteriormente uma suficiência estatística não
+predefinida.
+
 ### Memória RAM
 
 A métrica de memória será a USS (*Unique Set Size*), obtida homogeneamente para
@@ -534,9 +622,13 @@ USS Python.
 
 Depois da primeira vinculação, o PostgreSQL permanece participante até o final
 da execução, inclusive entre conexões posteriores. A média de PostgreSQL é a
-média aritmética das amostras e inclui os zeros convencionais anteriores à
-primeira conexão. O pico é o maior valor observado. A mesma regra de média e
-pico é aplicada à RAM Python e à RAM total.
+média aritmética somente das amostras válidas de USS obtidas depois da primeira
+vinculação. Assim, os zeros anteriores à conexão são identificados como
+convencionais e não reduzem `ram_media_postgres_mb`; um valor USS igual a zero
+obtido em uma leitura real posterior continua incluído. Se não houver nenhuma
+leitura real válida de USS do PostgreSQL, a consolidação falha explicitamente,
+sem fabricar uma média. O pico continua sendo o maior valor observado, e a
+mesma regra de média e pico é aplicada à RAM Python e à RAM total.
 
 O consumo total do sistema operacional não será utilizado como referência, pois
 poderia incluir processos externos ao experimento.
@@ -571,6 +663,12 @@ memória privada ou zero.
 
 O mesmo procedimento de monitoramento será aplicado a todos os cenários da
 modalidade `recursos`. O intervalo permanecerá fixo em 0,5 segundo.
+
+Como indicador complementar, o monitor registrará `psutil.virtual_memory().available`
+no início da execução e em cada amostra. O CSV da modalidade `recursos` conterá
+`memoria_disponivel_inicial_mb` para diagnóstico e
+`memoria_disponivel_reducao_maxima_mb`, calculado como a maior diferença entre o
+valor inicial e uma amostra posterior, em MB. A métrica terá limite inferior de zero. Caso a memória disponível não fique abaixo do valor inicial durante a execução, será registrado 0, indicando ausência de redução observada.
 
 ---
 
@@ -849,6 +947,8 @@ cpu_media_total
 cpu_pico_total
 ram_media_total_mb
 ram_pico_total_mb
+memoria_disponivel_inicial_mb
+memoria_disponivel_reducao_maxima_mb
 timestamp
 ```
 
@@ -895,6 +995,10 @@ vazios. CPU e RAM da modalidade `recursos`, coletadas a cada 0,5 segundo, são a
 métricas oficiais de recursos. Os tempos e throughput das execuções monitoradas
 continuam registrados somente para diagnóstico. A proveniência oficial e
 diagnóstica fica declarada em `campanha.json`.
+
+Os campos de memória disponível do sistema também permanecem nos CSVs de
+`recursos` como indicadores complementares para diagnóstico e não alteram as
+métricas de USS.
 
 Na análise estatística, a modalidade `desempenho` consolidará `tempo_total` e
 `throughput`, podendo apresentar os tempos por etapa como indicadores
