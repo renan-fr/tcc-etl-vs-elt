@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from io import StringIO
 import os
 from pathlib import Path
 import argparse
@@ -22,6 +21,18 @@ except ModuleNotFoundError:
     from benchmark_paths import (
         diretorio_modalidade_obrigatorio,
         validar_execucao_inedita,
+    )
+try:
+    from src.enem.serializacao_csv import (
+        LeitorCsvEmBlocos,
+        TAMANHO_BLOCO_PADRAO,
+        preparar_dataframe_para_copy,
+    )
+except ModuleNotFoundError:
+    from enem.serializacao_csv import (
+        LeitorCsvEmBlocos,
+        TAMANHO_BLOCO_PADRAO,
+        preparar_dataframe_para_copy,
     )
 import psycopg2
 from psycopg2 import sql
@@ -115,6 +126,43 @@ class ResultadoBenchmark:
     linhas_participantes: int
     linhas_resultados: int
     timestamp: str
+
+
+@dataclass(frozen=True)
+class MedicaoSerializacaoTabela:
+    tabela: str
+    tempo_preparacao: float
+    tempo_serializacao: float
+    tempo_chamada_copy: float
+    blocos: int
+
+    @property
+    def tempo_carga_instrumentada(self) -> float:
+        # A chamada COPY contem a preparacao e a serializacao sob demanda.
+        return self.tempo_chamada_copy
+
+
+@dataclass
+class DiagnosticoSerializacao:
+    medicoes: list[MedicaoSerializacaoTabela]
+
+    def registrar(
+        self,
+        tabela: str,
+        tempo_preparacao: float,
+        tempo_serializacao: float,
+        tempo_chamada_copy: float,
+        blocos: int,
+    ) -> None:
+        self.medicoes.append(
+            MedicaoSerializacaoTabela(
+                tabela=tabela,
+                tempo_preparacao=tempo_preparacao,
+                tempo_serializacao=tempo_serializacao,
+                tempo_chamada_copy=tempo_chamada_copy,
+                blocos=blocos,
+            )
+        )
 
 
 ConexaoPostgres = str | dict[str, Any]
@@ -901,12 +949,8 @@ def _criar_tabela(
 
 
 def _preparar_dataframe_para_copy(df: pd.DataFrame) -> pd.DataFrame:
-    preparado = df.copy()
-    for coluna in preparado.select_dtypes(include=["boolean", "bool"]).columns:
-        preparado[coluna] = preparado[coluna].map(
-            {True: "true", False: "false", pd.NA: None}
-        )
-    return preparado
+    """Compatibilidade para chamadas existentes; a implementacao e compartilhada."""
+    return preparar_dataframe_para_copy(df)
 
 
 def _copy_dataframe(
@@ -914,16 +958,8 @@ def _copy_dataframe(
     df: pd.DataFrame,
     schema: str,
     tabela: str,
+    diagnostico: DiagnosticoSerializacao | None = None,
 ) -> None:
-    buffer = StringIO()
-    _preparar_dataframe_para_copy(df).to_csv(
-        buffer,
-        index=False,
-        header=True,
-        na_rep="",
-    )
-    buffer.seek(0)
-
     colunas = [sql.Identifier(coluna) for coluna in df.columns]
     comando = sql.SQL(
         "COPY {}.{} ({}) FROM STDIN WITH (FORMAT CSV, HEADER TRUE, NULL '')"
@@ -932,7 +968,25 @@ def _copy_dataframe(
         sql.Identifier(tabela),
         sql.SQL(", ").join(colunas),
     )
-    cursor.copy_expert(comando.as_string(cursor), buffer)
+    leitor = LeitorCsvEmBlocos(
+        df,
+        tamanho_bloco=TAMANHO_BLOCO_PADRAO,
+        instrumentar=diagnostico is not None,
+    )
+    comando_copy = comando.as_string(cursor)
+    if diagnostico is None:
+        cursor.copy_expert(comando_copy, leitor)
+    else:
+        inicio = time.perf_counter()
+        cursor.copy_expert(comando_copy, leitor)
+        tempo_chamada_copy = time.perf_counter() - inicio
+        diagnostico.registrar(
+            tabela,
+            leitor.tempo_preparacao,
+            leitor.tempo_serializacao,
+            tempo_chamada_copy,
+            leitor.blocos,
+        )
 
 
 def carregar_tabela(
@@ -965,6 +1019,7 @@ def _carregar_tabela_cursor(
     tabela: str,
     contrato: list[tuple[str, str]],
     if_exists: str,
+    diagnostico: DiagnosticoSerializacao | None = None,
 ) -> None:
     cursor.execute(
         sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema))
@@ -977,7 +1032,7 @@ def _carregar_tabela_cursor(
             )
         )
     _criar_tabela(cursor, schema, tabela, contrato)
-    _copy_dataframe(cursor, df, schema, tabela)
+    _copy_dataframe(cursor, df, schema, tabela, diagnostico)
 
 
 def carregar_enem(
@@ -986,6 +1041,7 @@ def carregar_enem(
     conexao_postgres: ConexaoPostgres,
     schema: str = "public",
     if_exists: str = "replace",
+    diagnostico: DiagnosticoSerializacao | None = None,
 ) -> None:
     if if_exists not in {"replace", "append"}:
         raise ValueError("if_exists deve ser 'replace' ou 'append'.")
@@ -999,6 +1055,7 @@ def carregar_enem(
                 TABELA_PARTICIPANTES,
                 CONTRATO_PARTICIPANTES,
                 if_exists,
+                diagnostico,
             )
             _carregar_tabela_cursor(
                 cursor,
@@ -1007,6 +1064,7 @@ def carregar_enem(
                 TABELA_RESULTADOS,
                 CONTRATO_RESULTADOS,
                 if_exists,
+                diagnostico,
             )
 
 # MAIN
@@ -1027,6 +1085,65 @@ def _imprimir_validacao(resultado: ResultadoValidacao) -> None:
             print(f"  - {alerta}")
     else:
         print("  Alertas: nenhum")
+
+
+def _imprimir_diagnostico_serializacao(
+    diagnostico: DiagnosticoSerializacao,
+    tempo_carga: float,
+    tempo_total: float,
+) -> None:
+    print("Diagnostico de serializacao do ETL ENEM:")
+    for medicao in diagnostico.medicoes:
+        percentual_tabela = (
+            100 * medicao.tempo_serializacao
+            / medicao.tempo_carga_instrumentada
+            if medicao.tempo_carga_instrumentada
+            else 0.0
+        )
+        print(f"  Tabela {medicao.tabela}:")
+        print(f"    Blocos serializados: {medicao.blocos}")
+        print(f"    Preparacao: {medicao.tempo_preparacao:.6f} s")
+        print(f"    Serializacao to_csv: {medicao.tempo_serializacao:.6f} s")
+        print(
+            "    Chamada COPY (inclui preparacao e serializacao): "
+            f"{medicao.tempo_chamada_copy:.6f} s"
+        )
+        print(
+            "    Serializacao / chamada COPY: "
+            f"{percentual_tabela:.2f}%"
+        )
+
+    tempo_preparacao = sum(
+        medicao.tempo_preparacao for medicao in diagnostico.medicoes
+    )
+    tempo_serializacao = sum(
+        medicao.tempo_serializacao for medicao in diagnostico.medicoes
+    )
+    tempo_chamada_copy = sum(
+        medicao.tempo_chamada_copy for medicao in diagnostico.medicoes
+    )
+    percentual_carga = (
+        100 * tempo_serializacao / tempo_carga if tempo_carga else 0.0
+    )
+    percentual_total = (
+        100 * tempo_serializacao / tempo_total if tempo_total else 0.0
+    )
+
+    print("  Agregado das duas tabelas:")
+    print(f"    Preparacao: {tempo_preparacao:.6f} s")
+    print(f"    Serializacao to_csv: {tempo_serializacao:.6f} s")
+    print(
+        "    Chamadas COPY (incluem preparacao e serializacao): "
+        f"{tempo_chamada_copy:.6f} s"
+    )
+    print(f"    Carga total do ENEM: {tempo_carga:.6f} s")
+    print(f"    Tempo total do pipeline: {tempo_total:.6f} s")
+    print(f"    Serializacao / carga total: {percentual_carga:.2f}%")
+    print(f"    Serializacao / tempo total: {percentual_total:.2f}%")
+    print(
+        "    Observacao: preparacao e serializacao ocorrem dentro da chamada "
+        "COPY e nao devem ser somadas a ela."
+    )
 
 
 def _iniciar_monitoramento(
@@ -1135,6 +1252,7 @@ def main(
     validar: bool = True,
     monitorar_recursos: bool = True,
     modalidade: str = "recursos",
+    diagnostico_serializacao: bool = False,
 ) -> None:
     limpar_relatorio_valores_desconhecidos()
     monitor = _iniciar_monitoramento(benchmark, monitorar_recursos)
@@ -1178,6 +1296,11 @@ def main(
             monitor.parar()
         raise SystemExit(str(erro)) from erro
 
+    diagnostico = (
+        DiagnosticoSerializacao(medicoes=[])
+        if diagnostico_serializacao
+        else None
+    )
     inicio = time.perf_counter()
     carregar_enem(
         participantes_tratados,
@@ -1185,9 +1308,17 @@ def main(
         conexao_postgres=conexao_postgres,
         schema=schema,
         if_exists=if_exists,
+        diagnostico=diagnostico,
     )
     tempo_carga = time.perf_counter() - inicio
     tempo_total = time.perf_counter() - inicio_total
+
+    if diagnostico is not None:
+        _imprimir_diagnostico_serializacao(
+            diagnostico,
+            tempo_carga=tempo_carga,
+            tempo_total=tempo_total,
+        )
 
     print("Participantes:", participantes_tratados.shape)
     print("Resultados:", resultados_tratados.shape)
@@ -1199,7 +1330,10 @@ def main(
         print("Valores desconhecidos:")
         print(desconhecidos.to_string(index=False))
     if not validar:
-        print("Validação interna ignorada no modo de desempenho.")
+        if diagnostico_serializacao:
+            print("Validacao interna ignorada no modo diagnostico.")
+        else:
+            print("Validação interna ignorada no modo de desempenho.")
 
     print(
         "Carga concluída: "
@@ -1237,6 +1371,8 @@ if __name__ == "__main__":
     )
     parser.add_argument("--rodada", type=int)
     parser.add_argument("--sem-monitoramento", action="store_true")
+    parser.add_argument("--diagnostico-serializacao", action="store_true")
+    parser.add_argument("--schema-diagnostico")
 
     args = parser.parse_args()
 
@@ -1246,6 +1382,33 @@ if __name__ == "__main__":
         parser.error("--rodada é obrigatória no modo medir.")
     if args.modo != "medir" and args.rodada is not None:
         parser.error("--rodada só pode ser usada no modo medir.")
+
+    if args.diagnostico_serializacao and args.modo != "certificar":
+        parser.error(
+            "--diagnostico-serializacao so pode ser usado com --modo certificar."
+        )
+    if args.diagnostico_serializacao and not args.schema_diagnostico:
+        parser.error(
+            "--schema-diagnostico e obrigatorio no diagnostico de serializacao."
+        )
+    if args.schema_diagnostico and not args.diagnostico_serializacao:
+        parser.error(
+            "--schema-diagnostico so pode ser usado com "
+            "--diagnostico-serializacao."
+        )
+
+    schema_oficial = os.getenv(
+        "POSTGRES_SCHEMA_ENEM_ETL_FINAL",
+        "enem_etl_final",
+    )
+    if args.diagnostico_serializacao and args.schema_diagnostico in {
+        "public",
+        schema_oficial,
+    }:
+        parser.error(
+            "--schema-diagnostico deve ser diferente de public e do schema "
+            "oficial do ETL ENEM."
+        )
 
     benchmark = args.modo != "certificar"
     modalidade = "desempenho" if args.sem_monitoramento else "recursos"
@@ -1257,12 +1420,20 @@ if __name__ == "__main__":
     main(
         limite=args.limite,
         database_url=os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL"),
-        schema=os.getenv("POSTGRES_SCHEMA_ENEM_ETL_FINAL", "enem_etl_final"),
+        schema=(
+            args.schema_diagnostico
+            if args.diagnostico_serializacao
+            else schema_oficial
+        ),
         if_exists="replace",
         benchmark=benchmark,
         benchmark_output=benchmark_output,
         rodada=args.rodada,
-        validar=args.modo == "certificar",
+        validar=(
+            args.modo == "certificar"
+            and not args.diagnostico_serializacao
+        ),
         monitorar_recursos=not args.sem_monitoramento,
         modalidade=modalidade,
+        diagnostico_serializacao=args.diagnostico_serializacao,
     )
