@@ -52,11 +52,13 @@ except ModuleNotFoundError:
     )
 try:
     from src.benchmark_output import (
+        finalizar_monitoramento_recursos,
         imprimir_resultado_benchmark,
         linhas_resultado_benchmark as _linhas_resumo_benchmark,
     )
 except ModuleNotFoundError:
     from benchmark_output import (
+        finalizar_monitoramento_recursos,
         imprimir_resultado_benchmark,
         linhas_resultado_benchmark as _linhas_resumo_benchmark,
     )
@@ -1208,7 +1210,7 @@ def _finalizar_benchmark(
         return
 
     recursos = (
-        monitor.parar_com_cpu_times()
+        finalizar_monitoramento_recursos(monitor)
         if monitor is not None
         else {campo: None for campo in CAMPOS_RECURSOS}
     )

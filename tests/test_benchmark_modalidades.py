@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import csv
 from collections import defaultdict
+from contextlib import redirect_stdout
 from dataclasses import asdict, fields, replace
 import importlib.util
 import inspect
+from io import StringIO
 import json
 import os
 from pathlib import Path
@@ -31,7 +33,10 @@ if importlib.util.find_spec("matplotlib") is None:
 
 from graficos import gerar_graficos
 from src import benchmark, benchmark_paths
-from src.benchmark_output import linhas_resultado_benchmark
+from src.benchmark_output import (
+    finalizar_monitoramento_recursos,
+    linhas_resultado_benchmark,
+)
 from src.enem import benchmark as benchmark_enem
 from src.tse import benchmark as benchmark_tse
 
@@ -583,6 +588,12 @@ class EquivalenciaFluxoTest(unittest.TestCase):
         valores = {campo: 1.0 for campo in modulo.CAMPOS_RECURSOS}
         valores["cpu_times_status"] = "valida"
         monitor.parar_com_cpu_times.return_value = valores
+        monitor.diagnostico_ram_amostras.return_value = {
+            "total": 4,
+            "validas": 3,
+            "incompletas": 1,
+            "percentual_incompletas": 25.0,
+        }
         return monitor
 
     def _fluxo_enem_etl(self, monitorar: bool) -> list[str]:
@@ -719,6 +730,70 @@ class EquivalenciaFluxoTest(unittest.TestCase):
         self.assertEqual(self._fluxo_enem_elt(False), self._fluxo_enem_elt(True))
         self.assertEqual(self._fluxo_tse_etl(False), self._fluxo_tse_etl(True))
         self.assertEqual(self._fluxo_tse_elt(False), self._fluxo_tse_elt(True))
+
+    def test_diagnostico_ram_e_emitido_uma_vez_nos_quatro_pipelines(self) -> None:
+        prefixo = "RAM_AMOSTRAS_JSON="
+        esperado = {
+            "total": 4,
+            "validas": 3,
+            "incompletas": 1,
+            "percentual_incompletas": 25.0,
+        }
+        for fluxo in (
+            self._fluxo_enem_etl,
+            self._fluxo_enem_elt,
+            self._fluxo_tse_etl,
+            self._fluxo_tse_elt,
+        ):
+            with self.subTest(fluxo=fluxo.__name__):
+                saida = StringIO()
+                with redirect_stdout(saida):
+                    fluxo(True)
+                linhas = [
+                    linha for linha in saida.getvalue().splitlines()
+                    if linha.startswith(prefixo)
+                ]
+                self.assertEqual(len(linhas), 1)
+                self.assertEqual(json.loads(linhas[0][len(prefixo):]), esperado)
+
+    def test_diagnostico_ram_nao_e_emitido_sem_monitoramento(self) -> None:
+        for fluxo in (
+            self._fluxo_enem_etl,
+            self._fluxo_enem_elt,
+            self._fluxo_tse_etl,
+            self._fluxo_tse_elt,
+        ):
+            with self.subTest(fluxo=fluxo.__name__):
+                saida = StringIO()
+                with redirect_stdout(saida):
+                    fluxo(False)
+                self.assertNotIn("RAM_AMOSTRAS_JSON=", saida.getvalue())
+
+    def test_diagnostico_ram_nao_altera_formato_dos_resultados(self) -> None:
+        campos_diagnostico = {
+            "total", "validas", "incompletas", "percentual_incompletas"
+        }
+        for modulo in PIPELINES:
+            with self.subTest(modulo=modulo.__name__):
+                campos_resultado = {campo.name for campo in fields(modulo.ResultadoBenchmark)}
+                self.assertTrue(campos_diagnostico.isdisjoint(campos_resultado))
+                self.assertTrue(campos_diagnostico.isdisjoint(modulo.CAMPOS_RECURSOS))
+
+    def test_falha_ao_finalizar_monitor_nao_e_mascarada(self) -> None:
+        class FalhaMonitor(RuntimeError):
+            pass
+
+        monitor = mock.Mock()
+        falha = FalhaMonitor("falha original")
+        monitor.parar_com_cpu_times.side_effect = falha
+        saida = StringIO()
+
+        with redirect_stdout(saida), self.assertRaises(FalhaMonitor) as capturada:
+            finalizar_monitoramento_recursos(monitor)
+
+        self.assertIs(capturada.exception, falha)
+        monitor.diagnostico_ram_amostras.assert_not_called()
+        self.assertNotIn("RAM_AMOSTRAS_JSON=", saida.getvalue())
 
 
 class FronteirasTempoTest(unittest.TestCase):

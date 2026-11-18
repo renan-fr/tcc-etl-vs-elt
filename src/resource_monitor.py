@@ -487,6 +487,30 @@ class MonitorRecursos:
         with self._lock:
             return [dict(item) for item in self._cpu_times_diagnosticos]
 
+    def diagnostico_ram_amostras(self) -> dict[str, int | float]:
+        """Resume a completude das amostras reais de RAM do PostgreSQL."""
+        with self._lock:
+            amostras_reais = [
+                amostra
+                for amostra in self._amostras
+                if not amostra.get("ram_postgres_convencional", False)
+            ]
+            total = len(amostras_reais)
+            validas = sum(
+                amostra.get("ram_postgres") is not None
+                for amostra in amostras_reais
+            )
+            incompletas = total - validas
+            percentual_incompletas = (
+                incompletas / total * 100.0 if total else 0.0
+            )
+            return {
+                "total": total,
+                "validas": validas,
+                "incompletas": incompletas,
+                "percentual_incompletas": percentual_incompletas,
+            }
+
     def _inicializar_cpu_times_postgres(
         self,
         identidade: tuple[int, float],
@@ -768,6 +792,102 @@ class MonitorRecursos:
             except (psutil.NoSuchProcess, psutil.ZombieProcess):
                 return None
             except psutil.AccessDenied as erro:
+                # Distingue acesso negado persistente de processo encerrado.
+                # Nunca interpreta memoria inacessivel como zero.
+                try:
+                    if not processo_atual.is_running():
+                        return None
+                    processo_verificado = psutil.Process(processo.pid)
+                    identidade_verificada = (
+                        processo_verificado.pid,
+                        processo_verificado.create_time(),
+                    )
+                    if identidade_verificada != identidade_esperada:
+                        return None
+                    if not processo_verificado.is_running():
+                        return None
+                except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                    return None
+                except psutil.AccessDenied:
+                    # Nao foi possivel confirmar encerramento:
+                    # preserva o diagnostico e a falha original.
+                    pass
+
+                import sys
+                import time
+                from datetime import datetime
+
+                def consultar(nome, funcao):
+                    try:
+                        return str(funcao())
+                    except Exception as exc:
+                        return f"{type(exc).__name__}: {exc}"
+
+                print(
+                    "\n========== DIAGNOSTICO USS POSTGRESQL ==========",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
+                print(
+                    f"Horario: {datetime.now().astimezone().isoformat()}",
+                    file=sys.stderr,
+                )
+                print(f"PID: {processo.pid}", file=sys.stderr)
+                print(f"Identidade esperada: {identidade_esperada}", file=sys.stderr)
+                print(f"Identidade atual: {identidade_atual}", file=sys.stderr)
+                print(f"Primeira falha: {erro_inicial!r}", file=sys.stderr)
+                print(f"Segunda falha: {erro!r}", file=sys.stderr)
+
+                verificacoes = {
+                    "is_running": processo_atual.is_running,
+                    "name": processo_atual.name,
+                    "username": processo_atual.username,
+                    "status": processo_atual.status,
+                    "ppid": processo_atual.ppid,
+                    "create_time": processo_atual.create_time,
+                    "memory_info": processo_atual.memory_info,
+                }
+
+                for nome, funcao in verificacoes.items():
+                    print(
+                        f"{nome}: {consultar(nome, funcao)}",
+                        file=sys.stderr,
+                    )
+
+                for tentativa in range(1, 4):
+                    time.sleep(0.2)
+
+                    print(
+                        f"USS tentativa diagnostica {tentativa}: "
+                        f"{consultar('USS', lambda: processo_atual.memory_full_info().uss)}",
+                        file=sys.stderr,
+                    )
+
+                print(
+                    "========== FIM DIAGNOSTICO USS ==========\n",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
+                # Ultima verificacao apos o diagnostico:
+                # o processo pode ter encerrado nesse intervalo.
+                try:
+                    processo_final = psutil.Process(processo.pid)
+                    identidade_final = (
+                        processo_final.pid,
+                        processo_final.create_time(),
+                    )
+                    if identidade_final != identidade_esperada:
+                        return None
+                    if not processo_final.is_running():
+                        return None
+                except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                    return None
+                except psutil.AccessDenied:
+                    # Sem evidencia de encerramento, mantem erro fatal.
+                    pass
+
                 raise ErroMonitoramentoRecursos(
                     f"Acesso negado ao ler USS de PostgreSQL (PID {processo.pid})."
                 ) from erro

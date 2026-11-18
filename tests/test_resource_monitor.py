@@ -43,6 +43,18 @@ class ProcessoFalso:
     def parent(self):
         return self._pai
 
+    def is_running(self) -> bool:
+        return True
+
+    def username(self) -> str:
+        return "postgres"
+
+    def status(self) -> str:
+        return psutil.STATUS_RUNNING
+
+    def ppid(self) -> int:
+        return self._pai.pid if self._pai is not None else 0
+
     def children(self, recursive: bool = False):
         return list(self.filhos)
 
@@ -207,9 +219,26 @@ class MonitorRecursosTest(unittest.TestCase):
     def test_acesso_negado_na_uss_postgres_gera_erro_explicito(self) -> None:
         processo = ProcessoFalso(20, uss=psutil.AccessDenied(20))
         atual = ProcessoFalso(20, criado=20.0, uss=psutil.AccessDenied(20))
-        with mock.patch.object(rm.psutil, "Process", return_value=atual):
+        atual.is_running = mock.Mock(return_value=True)
+        with mock.patch.object(rm.time, "sleep"), mock.patch.object(
+            rm.psutil, "Process", return_value=atual
+        ):
             with self.assertRaisesRegex(rm.ErroMonitoramentoRecursos, "Acesso negado"):
                 rm.MonitorRecursos._ler_ram_postgres(processo, (20, 20.0))
+
+    def test_processo_desaparece_apos_diagnostico_uss_retorna_none(self) -> None:
+        processo = ProcessoFalso(20, uss=psutil.AccessDenied(20))
+        atual = ProcessoFalso(20, criado=20.0, uss=psutil.AccessDenied(20))
+        atual.is_running = mock.Mock(return_value=True)
+
+        with mock.patch.object(rm.time, "sleep"), mock.patch.object(
+            rm.psutil,
+            "Process",
+            side_effect=[atual, atual, psutil.NoSuchProcess(20)],
+        ):
+            valor = rm.MonitorRecursos._ler_ram_postgres(processo, (20, 20.0))
+
+        self.assertIsNone(valor)
 
     def test_uss_postgres_indisponivel_gera_erro_explicito(self) -> None:
         processo = ProcessoFalso(20, uss=AttributeError())
@@ -546,6 +575,107 @@ class MonitorRecursosTest(unittest.TestCase):
         self.assertAlmostEqual(resultado["ram_media_postgres_mb"], 400 / 1024**2)
         self.assertAlmostEqual(resultado["ram_media_total_mb"], 700 / 1024**2)
         self.assertAlmostEqual(resultado["ram_pico_total_mb"], 700 / 1024**2)
+
+    def test_diagnostico_ram_amostras_todas_validas(self) -> None:
+        python = ProcessoFalso(10, nome="python.exe")
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos()
+        monitor._amostras = [
+            {"ram_postgres": 100.0, "ram_postgres_convencional": False},
+            {"ram_postgres": 0.0, "ram_postgres_convencional": False},
+        ]
+
+        resultado = monitor.diagnostico_ram_amostras()
+
+        self.assertEqual(
+            resultado,
+            {
+                "total": 2,
+                "validas": 2,
+                "incompletas": 0,
+                "percentual_incompletas": 0.0,
+            },
+        )
+
+    def test_diagnostico_ram_amostras_algumas_incompletas(self) -> None:
+        python = ProcessoFalso(10, nome="python.exe")
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos()
+        monitor._amostras = [
+            {"ram_postgres": 100.0, "ram_postgres_convencional": False},
+            {"ram_postgres": None, "ram_postgres_convencional": False},
+            {"ram_postgres": 200.0, "ram_postgres_convencional": False},
+        ]
+
+        resultado = monitor.diagnostico_ram_amostras()
+
+        self.assertEqual(resultado["total"], 3)
+        self.assertEqual(resultado["validas"], 2)
+        self.assertEqual(resultado["incompletas"], 1)
+        self.assertAlmostEqual(resultado["percentual_incompletas"], 100 / 3)
+
+    def test_diagnostico_ram_amostras_todas_incompletas(self) -> None:
+        python = ProcessoFalso(10, nome="python.exe")
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos()
+        monitor._amostras = [
+            {"ram_postgres": None, "ram_postgres_convencional": False},
+            {"ram_postgres": None, "ram_postgres_convencional": False},
+        ]
+
+        resultado = monitor.diagnostico_ram_amostras()
+
+        self.assertEqual(
+            resultado,
+            {
+                "total": 2,
+                "validas": 0,
+                "incompletas": 2,
+                "percentual_incompletas": 100.0,
+            },
+        )
+
+    def test_diagnostico_ram_amostras_sem_amostra_real(self) -> None:
+        python = ProcessoFalso(10, nome="python.exe")
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos()
+
+        resultado = monitor.diagnostico_ram_amostras()
+
+        self.assertEqual(
+            resultado,
+            {
+                "total": 0,
+                "validas": 0,
+                "incompletas": 0,
+                "percentual_incompletas": 0.0,
+            },
+        )
+
+    def test_diagnostico_ram_amostras_exclui_convencionais(self) -> None:
+        python = ProcessoFalso(10, nome="python.exe")
+        with mock.patch.object(rm.psutil, "Process", return_value=python):
+            monitor = rm.MonitorRecursos()
+        monitor._amostras = [
+            {"ram_postgres": 0.0, "ram_postgres_convencional": True},
+            {"ram_postgres": None, "ram_postgres_convencional": True},
+            {"ram_postgres": 100.0, "ram_postgres_convencional": False},
+            {"ram_postgres": None, "ram_postgres_convencional": False},
+        ]
+        amostras_antes = [dict(amostra) for amostra in monitor._amostras]
+
+        resultado = monitor.diagnostico_ram_amostras()
+
+        self.assertEqual(
+            resultado,
+            {
+                "total": 2,
+                "validas": 1,
+                "incompletas": 1,
+                "percentual_incompletas": 50.0,
+            },
+        )
+        self.assertEqual(monitor._amostras, amostras_antes)
 
     def test_media_postgres_exclui_zero_convencional_mas_preserva_zero_real(self) -> None:
         python = ProcessoFalso(10, nome="python.exe")
