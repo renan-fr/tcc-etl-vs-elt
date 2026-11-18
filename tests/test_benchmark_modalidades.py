@@ -10,8 +10,11 @@ from io import StringIO
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
+import threading
+import time
 import types
 import unittest
 from unittest import mock
@@ -210,6 +213,103 @@ class MatrizEOrquestradorTest(unittest.TestCase):
         ):
             self.assertEqual(log.count(mensagem), 1)
 
+    def test_falha_de_escrita_no_log_encerra_subprocesso_ativo(self) -> None:
+        class LogComFalha(StringIO):
+            def write(self, _texto: str) -> int:
+                raise OSError("disco indisponivel")
+
+        codigo = "import time; print('antes da falha', flush=True); time.sleep(30)"
+        inicio = time.monotonic()
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            with self.assertRaises(benchmark.ErroCapturaFluxo) as contexto:
+                benchmark.executar_pipeline(
+                    [sys.executable, "-u", "-c", codigo],
+                    ambiente=os.environ.copy(),
+                    arquivo_log=LogComFalha(),
+                )
+
+        self.assertLess(time.monotonic() - inicio, 5)
+        self.assertIsInstance(contexto.exception.__cause__, OSError)
+        self.assertIn("stdout", str(contexto.exception))
+        self.assertIn("disco indisponivel", str(contexto.exception))
+
+    def test_falha_de_leitura_encerra_processo_e_finaliza_as_threads(self) -> None:
+        class FluxoControlado:
+            def __init__(
+                self, finalizado: threading.Event, *, falhar: bool = False
+            ) -> None:
+                self.finalizado = finalizado
+                self.falhar = falhar
+                self.fechado = threading.Event()
+
+            def readline(self) -> str:
+                if self.falhar:
+                    self.falhar = False
+                    raise OSError("pipe ilegivel")
+                self.finalizado.wait()
+                return ""
+
+            def close(self) -> None:
+                self.fechado.set()
+
+        class ProcessoAtivo:
+            def __init__(self, fluxo_com_falha: str) -> None:
+                self.finalizado = threading.Event()
+                self.stdout = FluxoControlado(
+                    self.finalizado, falhar=fluxo_com_falha == "stdout"
+                )
+                self.stderr = FluxoControlado(
+                    self.finalizado, falhar=fluxo_com_falha == "stderr"
+                )
+                self.returncode = None
+                self.terminado = False
+
+            def poll(self):
+                return self.returncode
+
+            def terminate(self) -> None:
+                self.terminado = True
+                self.returncode = -15
+                self.finalizado.set()
+
+            def wait(self, timeout=None):
+                if not self.finalizado.wait(timeout):
+                    raise subprocess.TimeoutExpired(["pipeline"], timeout)
+                return self.returncode
+
+            def kill(self) -> None:
+                self.returncode = -9
+                self.finalizado.set()
+
+        for nome_fluxo in ("stdout", "stderr"):
+            with self.subTest(nome_fluxo=nome_fluxo):
+                processo = ProcessoAtivo(nome_fluxo)
+                with mock.patch.object(
+                    benchmark.subprocess, "Popen", return_value=processo
+                ):
+                    with self.assertRaises(benchmark.ErroCapturaFluxo) as contexto:
+                        benchmark.executar_pipeline(
+                            ["pipeline"],
+                            ambiente={},
+                            arquivo_log=StringIO(),
+                        )
+
+                self.assertTrue(processo.terminado)
+                self.assertTrue(processo.stdout.fechado.is_set())
+                self.assertTrue(processo.stderr.fechado.is_set())
+                self.assertIn(nome_fluxo, str(contexto.exception))
+                self.assertIsInstance(contexto.exception.__cause__, OSError)
+
+    def test_codigo_de_saida_diferente_de_zero_continua_sendo_propagado(self) -> None:
+        with self.assertRaises(subprocess.CalledProcessError) as contexto:
+            benchmark.executar_pipeline(
+                [sys.executable, "-u", "-c", "raise SystemExit(7)"],
+                ambiente=os.environ.copy(),
+                arquivo_log=StringIO(),
+            )
+
+        self.assertEqual(contexto.exception.returncode, 7)
+
     def test_campanha_interrompida_preserva_log_e_metadados(self) -> None:
         with tempfile.TemporaryDirectory() as temporario:
             campanha = Path(temporario) / "campanha"
@@ -245,6 +345,46 @@ class MatrizEOrquestradorTest(unittest.TestCase):
         self.assertIn("=== 1/16 | aquecimento |", log)
         self.assertIn("saida antes da interrupcao", log)
         self.assertIn("KeyboardInterrupt", log)
+
+    def test_falha_de_captura_marca_campanha_como_falhou(self) -> None:
+        def falhar_com_log_indisponivel(_comando, **kwargs) -> None:
+            kwargs["arquivo_log"].close()
+            raise benchmark.ErroCapturaFluxo(
+                "Falha ao capturar stdout do subprocesso: disco indisponivel"
+            )
+
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = Path(temporario) / "campanha"
+            campanha.mkdir()
+            erro_terminal = StringIO()
+            argumentos = [
+                "benchmark.py", "--run-id", "captura_falhou",
+                "--volumes", "100000", "--rodadas", "1",
+            ]
+            with mock.patch.object(sys, "argv", argumentos), mock.patch.object(
+                benchmark, "validar_git_limpo"
+            ), mock.patch.object(
+                benchmark, "criar_diretorio_campanha", return_value=campanha
+            ), mock.patch.object(
+                benchmark, "obter_commit_git", return_value="abc123"
+            ), mock.patch.object(
+                benchmark,
+                "executar_pipeline",
+                side_effect=falhar_com_log_indisponivel,
+            ), redirect_stderr(erro_terminal):
+                with self.assertRaises(benchmark.ErroCapturaFluxo):
+                    benchmark.main()
+
+            metadados = json.loads(
+                (campanha / "campanha.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(metadados["status"], "falhou")
+        self.assertEqual(metadados["execucoes_concluidas"], 0)
+        self.assertEqual(metadados["erro"]["tipo"], "ErroCapturaFluxo")
+        self.assertIn("disco indisponivel", metadados["erro"]["mensagem"])
+        self.assertIn("disco indisponivel", erro_terminal.getvalue())
+        self.assertIn("Falha adicional", erro_terminal.getvalue())
 
     def test_campanha_completa_simulada_tem_um_aquecimento_e_cinco_rodadas(self) -> None:
         with tempfile.TemporaryDirectory() as temporario:

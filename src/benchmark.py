@@ -6,6 +6,7 @@ import importlib.metadata
 import json
 import os
 import platform
+import queue
 from pathlib import Path
 import random
 import re
@@ -353,16 +354,55 @@ def _replicar_fluxo(
     destino: TextIO,
     arquivo_log: TextIO,
     lock: threading.Lock,
+    nome_fluxo: str,
+    falhas: queue.Queue[tuple[str, BaseException]],
 ) -> None:
     try:
-        for trecho in iter(origem.readline, ""):
-            with lock:
-                destino.write(trecho)
-                destino.flush()
-                arquivo_log.write(trecho)
-                arquivo_log.flush()
-    finally:
-        origem.close()
+        try:
+            for trecho in iter(origem.readline, ""):
+                with lock:
+                    destino.write(trecho)
+                    destino.flush()
+                    arquivo_log.write(trecho)
+                    arquivo_log.flush()
+        finally:
+            origem.close()
+    except BaseException as erro:
+        falhas.put((nome_fluxo, erro))
+
+
+class ErroCapturaFluxo(RuntimeError):
+    """Indica que uma thread deixou de capturar stdout ou stderr."""
+
+
+def _propagar_falha_captura(
+    falhas: queue.Queue[tuple[str, BaseException]],
+) -> None:
+    try:
+        nome_fluxo, erro = falhas.get_nowait()
+    except queue.Empty:
+        return
+    raise ErroCapturaFluxo(
+        f"Falha ao capturar {nome_fluxo} do subprocesso: "
+        f"{_mensagem_erro_segura(erro)}"
+    ) from erro
+
+
+def _encerrar_processo(processo: subprocess.Popen[str]) -> None:
+    """Encerra e coleta um subprocesso que ainda esteja ativo."""
+    if processo.poll() is not None:
+        return
+    try:
+        processo.terminate()
+    except OSError:
+        pass
+    try:
+        processo.wait(timeout=5)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    processo.kill()
+    processo.wait()
 
 
 def executar_pipeline(
@@ -386,27 +426,52 @@ def executar_pipeline(
     assert processo.stdout is not None
     assert processo.stderr is not None
     lock = threading.Lock()
+    falhas: queue.Queue[tuple[str, BaseException]] = queue.Queue()
     threads = [
         threading.Thread(
             target=_replicar_fluxo,
-            args=(processo.stdout, sys.stdout, arquivo_log, lock),
+            args=(processo.stdout, sys.stdout, arquivo_log, lock, "stdout", falhas),
+            name="benchmark-stdout",
         ),
         threading.Thread(
             target=_replicar_fluxo,
-            args=(processo.stderr, sys.stderr, arquivo_log, lock),
+            args=(processo.stderr, sys.stderr, arquivo_log, lock, "stderr", falhas),
+            name="benchmark-stderr",
         ),
     ]
-    for thread in threads:
-        thread.start()
+    threads_iniciadas: list[threading.Thread] = []
     try:
-        codigo = processo.wait()
-    except BaseException:
-        processo.terminate()
-        processo.wait()
+        for thread in threads:
+            thread.start()
+            threads_iniciadas.append(thread)
+        while processo.poll() is None:
+            try:
+                nome_fluxo, erro = falhas.get(timeout=0.05)
+            except queue.Empty:
+                continue
+            raise ErroCapturaFluxo(
+                f"Falha ao capturar {nome_fluxo} do subprocesso: "
+                f"{_mensagem_erro_segura(erro)}"
+            ) from erro
+        codigo = processo.returncode
+    except BaseException as erro:
+        try:
+            _encerrar_processo(processo)
+        except BaseException as erro_encerramento:
+            erro.add_note(
+                "Falha adicional ao encerrar o subprocesso: "
+                f"{_mensagem_erro_segura(erro_encerramento)}"
+            )
         raise
     finally:
-        for thread in threads:
+        for thread in threads_iniciadas:
             thread.join()
+        for fluxo in (processo.stdout, processo.stderr):
+            try:
+                fluxo.close()
+            except Exception:
+                pass
+    _propagar_falha_captura(falhas)
     if codigo != 0:
         raise subprocess.CalledProcessError(codigo, argumentos)
 
@@ -583,9 +648,24 @@ def main() -> None:
             )
             metadados["fim"] = agora_iso()
             metadados["erro"] = _erro_persistivel(erro, "execucao_pipeline")
-            salvar_metadados(metadados_caminho, metadados)
-            traceback.print_exception(erro, file=arquivo_log)
-            arquivo_log.flush()
+            try:
+                salvar_metadados(metadados_caminho, metadados)
+            except Exception as erro_metadados:
+                print(
+                    "Falha adicional ao salvar campanha.json: "
+                    f"{_mensagem_erro_segura(erro_metadados)}",
+                    file=sys.stderr,
+                )
+            traceback.print_exception(erro, file=sys.stderr)
+            try:
+                traceback.print_exception(erro, file=arquivo_log)
+                arquivo_log.flush()
+            except Exception as erro_log:
+                print(
+                    "Falha adicional ao registrar a exceção em campanha.log: "
+                    f"{_mensagem_erro_segura(erro_log)}",
+                    file=sys.stderr,
+                )
             raise
 
     metadados["status"] = "concluida"
