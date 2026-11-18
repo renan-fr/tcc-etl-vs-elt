@@ -12,6 +12,9 @@ import re
 import struct
 import subprocess
 import sys
+import threading
+import traceback
+from typing import TextIO
 from urllib.parse import unquote, urlsplit
 
 import psycopg2
@@ -337,6 +340,77 @@ def comando(
     return argumentos
 
 
+def _registrar_mensagem(arquivo_log: TextIO, mensagem: str) -> None:
+    texto = mensagem + "\n"
+    sys.stdout.write(texto)
+    sys.stdout.flush()
+    arquivo_log.write(texto)
+    arquivo_log.flush()
+
+
+def _replicar_fluxo(
+    origem: TextIO,
+    destino: TextIO,
+    arquivo_log: TextIO,
+    lock: threading.Lock,
+) -> None:
+    try:
+        for trecho in iter(origem.readline, ""):
+            with lock:
+                destino.write(trecho)
+                destino.flush()
+                arquivo_log.write(trecho)
+                arquivo_log.flush()
+    finally:
+        origem.close()
+
+
+def executar_pipeline(
+    argumentos: list[str],
+    *,
+    ambiente: dict[str, str],
+    arquivo_log: TextIO,
+) -> None:
+    """Executa um pipeline e replica stdout/stderr incrementalmente no log."""
+    processo = subprocess.Popen(
+        argumentos,
+        cwd=BASE_DIR,
+        env=ambiente,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+    )
+    assert processo.stdout is not None
+    assert processo.stderr is not None
+    lock = threading.Lock()
+    threads = [
+        threading.Thread(
+            target=_replicar_fluxo,
+            args=(processo.stdout, sys.stdout, arquivo_log, lock),
+        ),
+        threading.Thread(
+            target=_replicar_fluxo,
+            args=(processo.stderr, sys.stderr, arquivo_log, lock),
+        ),
+    ]
+    for thread in threads:
+        thread.start()
+    try:
+        codigo = processo.wait()
+    except BaseException:
+        processo.terminate()
+        processo.wait()
+        raise
+    finally:
+        for thread in threads:
+            thread.join()
+    if codigo != 0:
+        raise subprocess.CalledProcessError(codigo, argumentos)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Orquestra a campanha global e randomizada de ENEM e TSE."
@@ -384,6 +458,11 @@ def main() -> None:
     criar_diretorios_modalidades(campanha_dir)
 
     metadados_caminho = campanha_dir / "campanha.json"
+    log_caminho = campanha_dir / "campanha.log"
+    log_caminho.touch()
+    with log_caminho.open("a", encoding="utf-8", buffering=1) as arquivo_log:
+        _registrar_mensagem(arquivo_log, f"Campanha: {run_id}")
+        _registrar_mensagem(arquivo_log, f"Seed: {args.seed}")
 
     load_dotenv(BASE_DIR / ".env")
     try:
@@ -395,6 +474,7 @@ def main() -> None:
     ambiente["BENCHMARK_OUTPUT_DIR"] = str(campanha_dir)
     ambiente["BENCHMARK_ORCHESTRATOR_RUN_ID"] = run_id
     ambiente["PYTHONIOENCODING"] = "utf-8"
+    ambiente["PYTHONUNBUFFERED"] = "1"
     rng = random.Random(args.seed)
     cenarios = [
         (modalidade, dataset, volume, arquitetura)
@@ -408,8 +488,6 @@ def main() -> None:
         *[("medir", rodada) for rodada in range(1, args.rodadas + 1)],
     ]
 
-    print(f"Campanha: {run_id}")
-    print(f"Seed: {args.seed}")
     total = len(cenarios) * len(fases)
     aquecimentos = len(cenarios)
     medicoes_validas = len(cenarios) * args.rodadas
@@ -473,32 +551,42 @@ def main() -> None:
     }
     salvar_metadados(metadados_caminho, metadados)
     indice = 0
-    try:
-        for modo, rodada in fases:
-            ordem = cenarios.copy()
-            rng.shuffle(ordem)
-            for modalidade, dataset, volume, arquitetura in ordem:
-                indice += 1
-                print(
-                    f"\n=== {indice}/{total} | {modo} | {dataset.upper()} | "
-                    f"{modalidade.upper()} | {volume} | {arquitetura.upper()} ==="
-                )
-                subprocess.run(
-                    comando(modalidade, dataset, arquitetura, volume, modo, rodada),
-                    cwd=BASE_DIR,
-                    env=ambiente,
-                    check=True,
-                )
-                metadados["execucoes_concluidas"] = indice
-                salvar_metadados(metadados_caminho, metadados)
-    except BaseException as erro:
-        metadados["status"] = (
-            "interrompida" if isinstance(erro, KeyboardInterrupt) else "falhou"
-        )
-        metadados["fim"] = agora_iso()
-        metadados["erro"] = _erro_persistivel(erro, "execucao_pipeline")
-        salvar_metadados(metadados_caminho, metadados)
-        raise
+    with log_caminho.open("a", encoding="utf-8", buffering=1) as arquivo_log:
+        try:
+            for modo, rodada in fases:
+                ordem = cenarios.copy()
+                rng.shuffle(ordem)
+                for modalidade, dataset, volume, arquitetura in ordem:
+                    indice += 1
+                    _registrar_mensagem(
+                        arquivo_log,
+                        f"\n=== {indice}/{total} | {modo} | {dataset.upper()} | "
+                        f"{modalidade.upper()} | {volume} | {arquitetura.upper()} ===",
+                    )
+                    executar_pipeline(
+                        comando(
+                            modalidade,
+                            dataset,
+                            arquitetura,
+                            volume,
+                            modo,
+                            rodada,
+                        ),
+                        ambiente=ambiente,
+                        arquivo_log=arquivo_log,
+                    )
+                    metadados["execucoes_concluidas"] = indice
+                    salvar_metadados(metadados_caminho, metadados)
+        except BaseException as erro:
+            metadados["status"] = (
+                "interrompida" if isinstance(erro, KeyboardInterrupt) else "falhou"
+            )
+            metadados["fim"] = agora_iso()
+            metadados["erro"] = _erro_persistivel(erro, "execucao_pipeline")
+            salvar_metadados(metadados_caminho, metadados)
+            traceback.print_exception(erro, file=arquivo_log)
+            arquivo_log.flush()
+            raise
 
     metadados["status"] = "concluida"
     metadados["fim"] = agora_iso()

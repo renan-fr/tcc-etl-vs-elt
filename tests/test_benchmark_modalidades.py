@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 from collections import defaultdict
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import asdict, fields, replace
 import importlib.util
 import inspect
@@ -101,9 +101,13 @@ class MatrizEOrquestradorTest(unittest.TestCase):
         campanha.mkdir(exist_ok=True)
         comandos: list[list[str]] = []
 
-        def executar(comando, **_kwargs):
+        def executar(comando, **kwargs):
             comandos.append(list(comando))
-            return mock.Mock(returncode=0)
+            arquivo_log = kwargs["arquivo_log"]
+            arquivo_log.write("Mensagem simulada do pipeline\n")
+            arquivo_log.write(
+                'RAM_AMOSTRAS_JSON={"total":1,"validas":1,"incompletas":0}\n'
+            )
 
         argumentos = [
             "benchmark.py", "--run-id", f"teste_{seed}",
@@ -116,17 +120,21 @@ class MatrizEOrquestradorTest(unittest.TestCase):
         ), mock.patch.object(
             benchmark, "obter_commit_git", return_value="abc123"
         ), mock.patch.object(
-            benchmark.subprocess, "run", side_effect=executar
+            benchmark, "executar_pipeline", side_effect=executar
         ):
             benchmark.main()
-        return comandos, json.loads((campanha / "campanha.json").read_text(encoding="utf-8"))
+        return (
+            comandos,
+            json.loads((campanha / "campanha.json").read_text(encoding="utf-8")),
+            (campanha / "campanha.log").read_text(encoding="utf-8"),
+        )
 
     def test_integracao_simulada_quantidades_flags_metadados_e_seed(self) -> None:
         with tempfile.TemporaryDirectory() as temporario:
             raiz = Path(temporario)
-            comandos_1, metadados = self._executar_orquestrador_simulado(raiz, 7)
-            comandos_2, _ = self._executar_orquestrador_simulado(raiz, 7)
-            comandos_3, _ = self._executar_orquestrador_simulado(raiz, 8)
+            comandos_1, metadados, log = self._executar_orquestrador_simulado(raiz, 7)
+            comandos_2, _, _ = self._executar_orquestrador_simulado(raiz, 7)
+            comandos_3, _, _ = self._executar_orquestrador_simulado(raiz, 8)
 
         self.assertEqual(comandos_1, comandos_2)
         self.assertNotEqual(comandos_1, comandos_3)
@@ -166,6 +174,77 @@ class MatrizEOrquestradorTest(unittest.TestCase):
             "cpu_times_processos_incompletos",
             metadados["modalidades"]["recursos"]["diagnosticos_cpu_times"],
         )
+        self.assertIn("Campanha: teste_7", log)
+        self.assertIn("Seed: 7", log)
+        self.assertEqual(log.count("=== "), 16)
+        self.assertEqual(log.count("Mensagem simulada do pipeline"), 16)
+        self.assertEqual(log.count("RAM_AMOSTRAS_JSON="), 16)
+
+    def test_execucao_replica_stdout_e_stderr_sem_duplicar(self) -> None:
+        codigo = (
+            "import sys; "
+            "print('mensagem stdout'); "
+            "print('RAM_AMOSTRAS_JSON={\\\"total\\\":1}', flush=True); "
+            "print('diagnostico USS stderr', file=sys.stderr, flush=True)"
+        )
+        saida = StringIO()
+        erros = StringIO()
+        with tempfile.TemporaryDirectory() as temporario:
+            caminho_log = Path(temporario) / "campanha.log"
+            with caminho_log.open("w", encoding="utf-8", buffering=1) as arquivo_log:
+                with redirect_stdout(saida), redirect_stderr(erros):
+                    benchmark.executar_pipeline(
+                        [sys.executable, "-u", "-c", codigo],
+                        ambiente=os.environ.copy(),
+                        arquivo_log=arquivo_log,
+                    )
+            log = caminho_log.read_text(encoding="utf-8")
+
+        self.assertIn("mensagem stdout", saida.getvalue())
+        self.assertIn("RAM_AMOSTRAS_JSON=", saida.getvalue())
+        self.assertIn("diagnostico USS stderr", erros.getvalue())
+        for mensagem in (
+            "mensagem stdout",
+            "RAM_AMOSTRAS_JSON=",
+            "diagnostico USS stderr",
+        ):
+            self.assertEqual(log.count(mensagem), 1)
+
+    def test_campanha_interrompida_preserva_log_e_metadados(self) -> None:
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = Path(temporario) / "campanha"
+            campanha.mkdir()
+
+            def interromper(_comando, **kwargs):
+                kwargs["arquivo_log"].write("saida antes da interrupcao\n")
+                raise KeyboardInterrupt()
+
+            argumentos = [
+                "benchmark.py", "--run-id", "interrompida",
+                "--volumes", "100000", "--rodadas", "1",
+            ]
+            with mock.patch.object(sys, "argv", argumentos), mock.patch.object(
+                benchmark, "validar_git_limpo"
+            ), mock.patch.object(
+                benchmark, "criar_diretorio_campanha", return_value=campanha
+            ), mock.patch.object(
+                benchmark, "obter_commit_git", return_value="abc123"
+            ), mock.patch.object(
+                benchmark, "executar_pipeline", side_effect=interromper
+            ):
+                with self.assertRaises(KeyboardInterrupt):
+                    benchmark.main()
+
+            metadados = json.loads(
+                (campanha / "campanha.json").read_text(encoding="utf-8")
+            )
+            log = (campanha / "campanha.log").read_text(encoding="utf-8")
+
+        self.assertEqual(metadados["status"], "interrompida")
+        self.assertEqual(metadados["execucoes_concluidas"], 0)
+        self.assertIn("=== 1/16 | aquecimento |", log)
+        self.assertIn("saida antes da interrupcao", log)
+        self.assertIn("KeyboardInterrupt", log)
 
     def test_campanha_completa_simulada_tem_um_aquecimento_e_cinco_rodadas(self) -> None:
         with tempfile.TemporaryDirectory() as temporario:
@@ -181,7 +260,7 @@ class MatrizEOrquestradorTest(unittest.TestCase):
             ), mock.patch.object(
                 benchmark, "obter_commit_git", return_value="abc123"
             ), mock.patch.object(
-                benchmark.subprocess, "run",
+                benchmark, "executar_pipeline",
                 side_effect=lambda comando, **_: comandos.append(list(comando)),
             ), mock.patch("builtins.print"):
                 benchmark.main()
@@ -225,7 +304,7 @@ class AmbienteCampanhaTest(unittest.TestCase):
         self,
         erro: BaseException,
         ambiente=None,
-    ) -> dict[str, object]:
+    ) -> tuple[dict[str, object], str]:
         with tempfile.TemporaryDirectory() as temporario:
             campanha = Path(temporario) / "campanha"
             campanha.mkdir()
@@ -240,7 +319,7 @@ class AmbienteCampanhaTest(unittest.TestCase):
             ), mock.patch.object(
                 benchmark, "obter_commit_git", return_value="abc123"
             ), mock.patch.object(
-                benchmark.subprocess, "run", side_effect=erro
+                benchmark, "executar_pipeline", side_effect=erro
             ), mock.patch.object(
                 benchmark, "coletar_ambiente",
                 return_value=ambiente if ambiente is not None else {
@@ -251,8 +330,11 @@ class AmbienteCampanhaTest(unittest.TestCase):
             ):
                 with self.assertRaises(type(erro)):
                     benchmark.main()
-            return json.loads(
-                (campanha / "campanha.json").read_text(encoding="utf-8")
+            return (
+                json.loads(
+                    (campanha / "campanha.json").read_text(encoding="utf-8")
+                ),
+                (campanha / "campanha.log").read_text(encoding="utf-8"),
             )
 
     def test_falha_inesperada_na_coleta_nao_interrompe_campanha(self) -> None:
@@ -277,7 +359,7 @@ class AmbienteCampanhaTest(unittest.TestCase):
                     "postgresql://usuario:nao-gravar@localhost/tcc"
                 ),
             ), mock.patch.object(
-                benchmark.subprocess, "run",
+                benchmark, "executar_pipeline",
                 side_effect=lambda comando, **_: comandos.append(list(comando)),
             ):
                 benchmark.main()
@@ -300,7 +382,7 @@ class AmbienteCampanhaTest(unittest.TestCase):
             "password=senha-ficticia "
             "postgresql://usuario:senha-url@localhost:5432/tcc"
         )
-        metadados = self._executar_com_erro_controlado(erro)
+        metadados, log = self._executar_com_erro_controlado(erro)
 
         self.assertEqual(metadados["status"], "falhou")
         registro_erro = metadados["erro"]
@@ -309,6 +391,8 @@ class AmbienteCampanhaTest(unittest.TestCase):
         self.assertNotIn("senha-ficticia", json.dumps(metadados))
         self.assertNotIn("senha-url", json.dumps(metadados))
         self.assertNotIn("postgresql://", registro_erro["mensagem"])
+        self.assertIn("Campanha: erro_controlado", log)
+        self.assertIn("RuntimeError", log)
 
     def test_coleta_ambiente_preserva_origem_e_nao_expoe_credenciais(self) -> None:
         with mock.patch.object(
