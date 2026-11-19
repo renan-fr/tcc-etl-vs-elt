@@ -213,6 +213,103 @@ class MatrizEOrquestradorTest(unittest.TestCase):
         ):
             self.assertEqual(log.count(mensagem), 1)
 
+    def test_execucao_sanitiza_credenciais_em_stdout_stderr_e_log(self) -> None:
+        url = "postgresql://usuario:senha-url@localhost:5432/tcc"
+        senha_parametro = "senha-parametro-ficticia"
+        segredo_ambiente = "segredo-conhecido-ficticio"
+        linha_ram = 'RAM_AMOSTRAS_JSON={"total":1,"validas":1}'
+        codigo = (
+            "import sys; "
+            f"print({'conexao: ' + url!r}); "
+            f"print({'valor isolado: ' + segredo_ambiente!r}); "
+            f"print({'password=' + senha_parametro!r}, file=sys.stderr); "
+            f"print({linha_ram!r})"
+        )
+        ambiente = os.environ.copy()
+        ambiente["DATABASE_URL"] = url
+        ambiente["POSTGRES_PASSWORD"] = segredo_ambiente
+        saida = StringIO()
+        erros = StringIO()
+        arquivo_log = StringIO()
+
+        with redirect_stdout(saida), redirect_stderr(erros):
+            benchmark.executar_pipeline(
+                [sys.executable, "-u", "-c", codigo],
+                ambiente=ambiente,
+                arquivo_log=arquivo_log,
+            )
+
+        destinos = (saida.getvalue(), erros.getvalue(), arquivo_log.getvalue())
+        for destino in destinos:
+            self.assertNotIn(url, destino)
+            self.assertNotIn("usuario", destino)
+            self.assertNotIn("senha-url", destino)
+            self.assertNotIn(senha_parametro, destino)
+            self.assertNotIn(segredo_ambiente, destino)
+        self.assertIn("<url_postgresql_redigida>", saida.getvalue())
+        self.assertIn("password=<valor_redigido>", erros.getvalue())
+        self.assertIn("valor isolado: <valor_redigido>", saida.getvalue())
+        self.assertIn(linha_ram + "\n", saida.getvalue())
+        self.assertIn(linha_ram + "\n", arquivo_log.getvalue())
+
+    def test_falha_na_sanitizacao_omite_mensagem_sem_expor_original(self) -> None:
+        segredo = "segredo-que-nao-pode-vazar"
+        saida = StringIO()
+        arquivo_log = StringIO()
+        with mock.patch.object(
+            benchmark,
+            "_sanitizar_texto",
+            side_effect=RuntimeError("sanitizador indisponivel"),
+        ), redirect_stdout(saida):
+            benchmark.executar_pipeline(
+                [sys.executable, "-u", "-c", f"print({segredo!r})"],
+                ambiente=os.environ.copy(),
+                arquivo_log=arquivo_log,
+            )
+
+        self.assertNotIn(segredo, saida.getvalue())
+        self.assertNotIn(segredo, arquivo_log.getvalue())
+        self.assertEqual(
+            saida.getvalue(),
+            benchmark.MENSAGEM_SANITIZACAO_INDISPONIVEL + "\n",
+        )
+        self.assertEqual(saida.getvalue(), arquivo_log.getvalue())
+
+    def test_senhas_curtas_sao_redigidas_apenas_em_contexto_de_credencial(self) -> None:
+        linha_ram = (
+            'RAM_AMOSTRAS_JSON={"total":10,"validas":1,"incompletas":0}\n'
+        )
+        for senha in ("0", "1", "segredo-conhecido-longo"):
+            with self.subTest(senha=senha):
+                self.assertEqual(
+                    benchmark._sanitizar_texto_seguro(linha_ram, (senha,)),
+                    linha_ram,
+                )
+
+        mensagens = (
+            "password=1",
+            'diagnostico {"password":"0"}',
+            'RAM_AMOSTRAS_JSON={"password":"1"}',
+            "postgresql://usuario:1@localhost/tcc",
+        )
+        for mensagem in mensagens:
+            with self.subTest(mensagem=mensagem):
+                sanitizada = benchmark._sanitizar_texto_seguro(
+                    mensagem,
+                    ("0", "1"),
+                )
+                self.assertNotIn(mensagem, sanitizada)
+                self.assertIn("redigid", sanitizada)
+
+        mensagem_longa = "falha usando segredo-conhecido-longo"
+        self.assertNotIn(
+            "segredo-conhecido-longo",
+            benchmark._sanitizar_texto_seguro(
+                mensagem_longa,
+                ("segredo-conhecido-longo",),
+            ),
+        )
+
     def test_falha_de_escrita_no_log_encerra_subprocesso_ativo(self) -> None:
         class LogComFalha(StringIO):
             def write(self, _texto: str) -> int:
@@ -300,6 +397,71 @@ class MatrizEOrquestradorTest(unittest.TestCase):
                 self.assertIn(nome_fluxo, str(contexto.exception))
                 self.assertIsInstance(contexto.exception.__cause__, OSError)
 
+    def test_falhas_de_terminate_e_kill_nao_bloqueiam_join(self) -> None:
+        class Fluxo:
+            def __init__(
+                self, finalizado: threading.Event, *, falhar: bool = False
+            ) -> None:
+                self.finalizado = finalizado
+                self.falhar = falhar
+                self.fechado = threading.Event()
+
+            def readline(self) -> str:
+                if self.falhar:
+                    self.falhar = False
+                    raise OSError("falha de leitura")
+                self.finalizado.wait()
+                return ""
+
+            def close(self) -> None:
+                self.fechado.set()
+
+        class ProcessoIncontrolavel:
+            def __init__(self) -> None:
+                self.finalizado = threading.Event()
+                self.stdout = Fluxo(self.finalizado, falhar=True)
+                self.stderr = Fluxo(self.finalizado)
+                self.returncode = None
+
+            def poll(self):
+                return self.returncode
+
+            def terminate(self) -> None:
+                raise OSError("terminate recusado")
+
+            def kill(self) -> None:
+                raise OSError("kill recusado")
+
+            def wait(self, timeout=None):
+                raise subprocess.TimeoutExpired(["pipeline"], timeout)
+
+        processo = ProcessoIncontrolavel()
+        inicio = time.monotonic()
+        with mock.patch.object(
+            benchmark.subprocess, "Popen", return_value=processo
+        ), mock.patch.object(benchmark, "TEMPO_LIMITE_THREAD_S", 0.01):
+            with self.assertRaises(benchmark.ErroCapturaFluxo) as contexto:
+                benchmark.executar_pipeline(
+                    ["pipeline"],
+                    ambiente={},
+                    arquivo_log=StringIO(),
+                )
+
+        self.assertLess(time.monotonic() - inicio, 1)
+        notas = "\n".join(getattr(contexto.exception, "__notes__", ()))
+        self.assertIn("Não foi possível confirmar o encerramento", notas)
+        self.assertIn("permanecerão daemon", notas)
+        threads_ativas = [
+            thread
+            for thread in threading.enumerate()
+            if thread.name in {"benchmark-stdout", "benchmark-stderr"}
+        ]
+        self.assertTrue(threads_ativas)
+        self.assertTrue(all(thread.daemon for thread in threads_ativas))
+
+        processo.finalizado.set()
+        self.assertTrue(processo.stderr.fechado.wait(1))
+
     def test_codigo_de_saida_diferente_de_zero_continua_sendo_propagado(self) -> None:
         with self.assertRaises(subprocess.CalledProcessError) as contexto:
             benchmark.executar_pipeline(
@@ -378,13 +540,93 @@ class MatrizEOrquestradorTest(unittest.TestCase):
             metadados = json.loads(
                 (campanha / "campanha.json").read_text(encoding="utf-8")
             )
+            log = (campanha / "campanha.log").read_text(encoding="utf-8")
 
         self.assertEqual(metadados["status"], "falhou")
         self.assertEqual(metadados["execucoes_concluidas"], 0)
         self.assertEqual(metadados["erro"]["tipo"], "ErroCapturaFluxo")
         self.assertIn("disco indisponivel", metadados["erro"]["mensagem"])
         self.assertIn("disco indisponivel", erro_terminal.getvalue())
-        self.assertIn("Falha adicional", erro_terminal.getvalue())
+        self.assertIn("disco indisponivel", log)
+
+    def test_falha_antes_da_campanha_e_comunicada_uma_vez_pela_cli(self) -> None:
+        erro_terminal = StringIO()
+        erro = RuntimeError("falha inicial password=segredo-ficticio")
+        argumentos = [
+            "benchmark.py", "--run-id", "falha_pre_campanha",
+            "--volumes", "100000", "--rodadas", "1",
+        ]
+        with mock.patch.object(sys, "argv", argumentos), mock.patch.object(
+            benchmark, "validar_git_limpo", side_effect=erro
+        ), mock.patch.object(
+            benchmark, "criar_diretorio_campanha"
+        ) as criar, redirect_stderr(erro_terminal):
+            with self.assertRaises(SystemExit) as contexto:
+                benchmark._executar_cli()
+
+        criar.assert_not_called()
+        self.assertEqual(contexto.exception.code, 1)
+        self.assertNotIn("segredo-ficticio", erro_terminal.getvalue())
+        self.assertIn("RuntimeError", erro_terminal.getvalue())
+        self.assertEqual(erro_terminal.getvalue().count("RuntimeError"), 1)
+
+    def test_keyboard_interrupt_antes_da_campanha_preserva_codigo_130(self) -> None:
+        erro_terminal = StringIO()
+        with mock.patch.object(
+            benchmark, "main", side_effect=KeyboardInterrupt
+        ), redirect_stderr(erro_terminal):
+            with self.assertRaises(SystemExit) as contexto:
+                benchmark._executar_cli()
+
+        self.assertEqual(contexto.exception.code, 130)
+        self.assertIn("KeyboardInterrupt", erro_terminal.getvalue())
+
+    def test_falha_na_inicializacao_persiste_json_e_log_quando_disponiveis(
+        self,
+    ) -> None:
+        salvar_original = benchmark.salvar_metadados
+        chamadas = 0
+
+        def falhar_na_primeira_gravacao(caminho, metadados) -> None:
+            nonlocal chamadas
+            chamadas += 1
+            if chamadas == 1:
+                raise OSError("falha inicial password=segredo-inicializacao")
+            salvar_original(caminho, metadados)
+
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = Path(temporario) / "campanha"
+            campanha.mkdir()
+            erro_terminal = StringIO()
+            argumentos = [
+                "benchmark.py", "--run-id", "falha_inicializacao",
+                "--volumes", "100000", "--rodadas", "1",
+            ]
+            with mock.patch.object(sys, "argv", argumentos), mock.patch.object(
+                benchmark, "validar_git_limpo"
+            ), mock.patch.object(
+                benchmark, "criar_diretorio_campanha", return_value=campanha
+            ), mock.patch.object(
+                benchmark, "obter_commit_git", return_value="abc123"
+            ), mock.patch.object(
+                benchmark, "salvar_metadados", side_effect=falhar_na_primeira_gravacao
+            ), mock.patch.object(
+                benchmark, "executar_pipeline"
+            ) as executar, redirect_stderr(erro_terminal):
+                with self.assertRaises(OSError):
+                    benchmark.main()
+
+            metadados = json.loads(
+                (campanha / "campanha.json").read_text(encoding="utf-8")
+            )
+            log = (campanha / "campanha.log").read_text(encoding="utf-8")
+
+        executar.assert_not_called()
+        self.assertEqual(metadados["status"], "falhou")
+        self.assertEqual(metadados["erro"]["contexto"], "inicializacao_campanha")
+        for destino in (json.dumps(metadados), log, erro_terminal.getvalue()):
+            self.assertNotIn("segredo-inicializacao", destino)
+            self.assertIn("OSError", destino)
 
     def test_campanha_completa_simulada_tem_um_aquecimento_e_cinco_rodadas(self) -> None:
         with tempfile.TemporaryDirectory() as temporario:
@@ -444,10 +686,11 @@ class AmbienteCampanhaTest(unittest.TestCase):
         self,
         erro: BaseException,
         ambiente=None,
-    ) -> tuple[dict[str, object], str]:
+    ) -> tuple[dict[str, object], str, str]:
         with tempfile.TemporaryDirectory() as temporario:
             campanha = Path(temporario) / "campanha"
             campanha.mkdir()
+            erro_terminal = StringIO()
             argumentos = [
                 "benchmark.py", "--run-id", "erro_controlado",
                 "--volumes", "100000", "--rodadas", "1",
@@ -467,7 +710,7 @@ class AmbienteCampanhaTest(unittest.TestCase):
                     "declarado_para_campanha_oficial": {},
                     "capturado_automaticamente": {},
                 },
-            ):
+            ), redirect_stderr(erro_terminal):
                 with self.assertRaises(type(erro)):
                     benchmark.main()
             return (
@@ -475,6 +718,7 @@ class AmbienteCampanhaTest(unittest.TestCase):
                     (campanha / "campanha.json").read_text(encoding="utf-8")
                 ),
                 (campanha / "campanha.log").read_text(encoding="utf-8"),
+                erro_terminal.getvalue(),
             )
 
     def test_falha_inesperada_na_coleta_nao_interrompe_campanha(self) -> None:
@@ -522,7 +766,7 @@ class AmbienteCampanhaTest(unittest.TestCase):
             "password=senha-ficticia "
             "postgresql://usuario:senha-url@localhost:5432/tcc"
         )
-        metadados, log = self._executar_com_erro_controlado(erro)
+        metadados, log, erro_terminal = self._executar_com_erro_controlado(erro)
 
         self.assertEqual(metadados["status"], "falhou")
         registro_erro = metadados["erro"]
@@ -533,6 +777,23 @@ class AmbienteCampanhaTest(unittest.TestCase):
         self.assertNotIn("postgresql://", registro_erro["mensagem"])
         self.assertIn("Campanha: erro_controlado", log)
         self.assertIn("RuntimeError", log)
+        for destino in (log, erro_terminal):
+            self.assertNotIn("senha-ficticia", destino)
+            self.assertNotIn("senha-url", destino)
+            self.assertNotIn("postgresql://", destino)
+            self.assertIn("RuntimeError", destino)
+
+    def test_traceback_redige_valor_sensivel_conhecido_do_ambiente(self) -> None:
+        segredo = "segredo-isolado-do-ambiente"
+        with mock.patch.dict(os.environ, {"POSTGRES_PASSWORD": segredo}):
+            metadados, log, erro_terminal = self._executar_com_erro_controlado(
+                RuntimeError(f"falha usando {segredo}")
+            )
+
+        self.assertEqual(metadados["status"], "falhou")
+        for destino in (json.dumps(metadados), log, erro_terminal):
+            self.assertNotIn(segredo, destino)
+            self.assertIn("<valor_redigido>", destino)
 
     def test_coleta_ambiente_preserva_origem_e_nao_expoe_credenciais(self) -> None:
         with mock.patch.object(
