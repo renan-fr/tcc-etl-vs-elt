@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 
@@ -69,3 +70,14 @@ def imprimir_resultado_benchmark(resultado: Any) -> None:
     """Exibe o resumo padronizado sem modificar ou recalcular metricas."""
     for linha in linhas_resultado_benchmark(resultado):
         print(linha)
+
+
+def finalizar_monitoramento_recursos(monitor: Any) -> dict[str, Any]:
+    """Finaliza o monitor e registra a completude USS fora das metricas."""
+    resultado = monitor.parar_com_cpu_times()
+    diagnostico = monitor.diagnostico_ram_amostras()
+    print(
+        "RAM_AMOSTRAS_JSON="
+        + json.dumps(diagnostico, ensure_ascii=False, separators=(",", ":"))
+    )
+    return resultado

@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import csv
 from collections import defaultdict
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import asdict, fields, replace
 import importlib.util
 import inspect
+from io import StringIO
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
+import threading
+import time
 import types
 import unittest
 from unittest import mock
@@ -31,7 +36,10 @@ if importlib.util.find_spec("matplotlib") is None:
 
 from graficos import gerar_graficos
 from src import benchmark, benchmark_paths
-from src.benchmark_output import linhas_resultado_benchmark
+from src.benchmark_output import (
+    finalizar_monitoramento_recursos,
+    linhas_resultado_benchmark,
+)
 from src.enem import benchmark as benchmark_enem
 from src.tse import benchmark as benchmark_tse
 
@@ -96,9 +104,13 @@ class MatrizEOrquestradorTest(unittest.TestCase):
         campanha.mkdir(exist_ok=True)
         comandos: list[list[str]] = []
 
-        def executar(comando, **_kwargs):
+        def executar(comando, **kwargs):
             comandos.append(list(comando))
-            return mock.Mock(returncode=0)
+            arquivo_log = kwargs["arquivo_log"]
+            arquivo_log.write("Mensagem simulada do pipeline\n")
+            arquivo_log.write(
+                'RAM_AMOSTRAS_JSON={"total":1,"validas":1,"incompletas":0}\n'
+            )
 
         argumentos = [
             "benchmark.py", "--run-id", f"teste_{seed}",
@@ -111,17 +123,21 @@ class MatrizEOrquestradorTest(unittest.TestCase):
         ), mock.patch.object(
             benchmark, "obter_commit_git", return_value="abc123"
         ), mock.patch.object(
-            benchmark.subprocess, "run", side_effect=executar
+            benchmark, "executar_pipeline", side_effect=executar
         ):
             benchmark.main()
-        return comandos, json.loads((campanha / "campanha.json").read_text(encoding="utf-8"))
+        return (
+            comandos,
+            json.loads((campanha / "campanha.json").read_text(encoding="utf-8")),
+            (campanha / "campanha.log").read_text(encoding="utf-8"),
+        )
 
     def test_integracao_simulada_quantidades_flags_metadados_e_seed(self) -> None:
         with tempfile.TemporaryDirectory() as temporario:
             raiz = Path(temporario)
-            comandos_1, metadados = self._executar_orquestrador_simulado(raiz, 7)
-            comandos_2, _ = self._executar_orquestrador_simulado(raiz, 7)
-            comandos_3, _ = self._executar_orquestrador_simulado(raiz, 8)
+            comandos_1, metadados, log = self._executar_orquestrador_simulado(raiz, 7)
+            comandos_2, _, _ = self._executar_orquestrador_simulado(raiz, 7)
+            comandos_3, _, _ = self._executar_orquestrador_simulado(raiz, 8)
 
         self.assertEqual(comandos_1, comandos_2)
         self.assertNotEqual(comandos_1, comandos_3)
@@ -161,6 +177,456 @@ class MatrizEOrquestradorTest(unittest.TestCase):
             "cpu_times_processos_incompletos",
             metadados["modalidades"]["recursos"]["diagnosticos_cpu_times"],
         )
+        self.assertIn("Campanha: teste_7", log)
+        self.assertIn("Seed: 7", log)
+        self.assertEqual(log.count("=== "), 16)
+        self.assertEqual(log.count("Mensagem simulada do pipeline"), 16)
+        self.assertEqual(log.count("RAM_AMOSTRAS_JSON="), 16)
+
+    def test_execucao_replica_stdout_e_stderr_sem_duplicar(self) -> None:
+        codigo = (
+            "import sys; "
+            "print('mensagem stdout'); "
+            "print('RAM_AMOSTRAS_JSON={\\\"total\\\":1}', flush=True); "
+            "print('diagnostico USS stderr', file=sys.stderr, flush=True)"
+        )
+        saida = StringIO()
+        erros = StringIO()
+        with tempfile.TemporaryDirectory() as temporario:
+            caminho_log = Path(temporario) / "campanha.log"
+            with caminho_log.open("w", encoding="utf-8", buffering=1) as arquivo_log:
+                with redirect_stdout(saida), redirect_stderr(erros):
+                    benchmark.executar_pipeline(
+                        [sys.executable, "-u", "-c", codigo],
+                        ambiente=os.environ.copy(),
+                        arquivo_log=arquivo_log,
+                    )
+            log = caminho_log.read_text(encoding="utf-8")
+
+        self.assertIn("mensagem stdout", saida.getvalue())
+        self.assertIn("RAM_AMOSTRAS_JSON=", saida.getvalue())
+        self.assertIn("diagnostico USS stderr", erros.getvalue())
+        for mensagem in (
+            "mensagem stdout",
+            "RAM_AMOSTRAS_JSON=",
+            "diagnostico USS stderr",
+        ):
+            self.assertEqual(log.count(mensagem), 1)
+
+    def test_execucao_sanitiza_credenciais_em_stdout_stderr_e_log(self) -> None:
+        url = "postgresql://usuario:senha-url@localhost:5432/tcc"
+        senha_parametro = "senha-parametro-ficticia"
+        segredo_ambiente = "segredo-conhecido-ficticio"
+        linha_ram = 'RAM_AMOSTRAS_JSON={"total":1,"validas":1}'
+        codigo = (
+            "import sys; "
+            f"print({'conexao: ' + url!r}); "
+            f"print({'valor isolado: ' + segredo_ambiente!r}); "
+            f"print({'password=' + senha_parametro!r}, file=sys.stderr); "
+            f"print({linha_ram!r})"
+        )
+        ambiente = os.environ.copy()
+        ambiente["DATABASE_URL"] = url
+        ambiente["POSTGRES_PASSWORD"] = segredo_ambiente
+        saida = StringIO()
+        erros = StringIO()
+        arquivo_log = StringIO()
+
+        with redirect_stdout(saida), redirect_stderr(erros):
+            benchmark.executar_pipeline(
+                [sys.executable, "-u", "-c", codigo],
+                ambiente=ambiente,
+                arquivo_log=arquivo_log,
+            )
+
+        destinos = (saida.getvalue(), erros.getvalue(), arquivo_log.getvalue())
+        for destino in destinos:
+            self.assertNotIn(url, destino)
+            self.assertNotIn("usuario", destino)
+            self.assertNotIn("senha-url", destino)
+            self.assertNotIn(senha_parametro, destino)
+            self.assertNotIn(segredo_ambiente, destino)
+        self.assertIn("<url_postgresql_redigida>", saida.getvalue())
+        self.assertIn("password=<valor_redigido>", erros.getvalue())
+        self.assertIn("valor isolado: <valor_redigido>", saida.getvalue())
+        self.assertIn(linha_ram + "\n", saida.getvalue())
+        self.assertIn(linha_ram + "\n", arquivo_log.getvalue())
+
+    def test_falha_na_sanitizacao_omite_mensagem_sem_expor_original(self) -> None:
+        segredo = "segredo-que-nao-pode-vazar"
+        saida = StringIO()
+        arquivo_log = StringIO()
+        with mock.patch.object(
+            benchmark,
+            "_sanitizar_texto",
+            side_effect=RuntimeError("sanitizador indisponivel"),
+        ), redirect_stdout(saida):
+            benchmark.executar_pipeline(
+                [sys.executable, "-u", "-c", f"print({segredo!r})"],
+                ambiente=os.environ.copy(),
+                arquivo_log=arquivo_log,
+            )
+
+        self.assertNotIn(segredo, saida.getvalue())
+        self.assertNotIn(segredo, arquivo_log.getvalue())
+        self.assertEqual(
+            saida.getvalue(),
+            benchmark.MENSAGEM_SANITIZACAO_INDISPONIVEL + "\n",
+        )
+        self.assertEqual(saida.getvalue(), arquivo_log.getvalue())
+
+    def test_senhas_curtas_sao_redigidas_apenas_em_contexto_de_credencial(self) -> None:
+        linha_ram = (
+            'RAM_AMOSTRAS_JSON={"total":10,"validas":1,"incompletas":0}\n'
+        )
+        for senha in ("0", "1", "segredo-conhecido-longo"):
+            with self.subTest(senha=senha):
+                self.assertEqual(
+                    benchmark._sanitizar_texto_seguro(linha_ram, (senha,)),
+                    linha_ram,
+                )
+
+        mensagens = (
+            "password=1",
+            'diagnostico {"password":"0"}',
+            'RAM_AMOSTRAS_JSON={"password":"1"}',
+            "postgresql://usuario:1@localhost/tcc",
+        )
+        for mensagem in mensagens:
+            with self.subTest(mensagem=mensagem):
+                sanitizada = benchmark._sanitizar_texto_seguro(
+                    mensagem,
+                    ("0", "1"),
+                )
+                self.assertNotIn(mensagem, sanitizada)
+                self.assertIn("redigid", sanitizada)
+
+        mensagem_longa = "falha usando segredo-conhecido-longo"
+        self.assertNotIn(
+            "segredo-conhecido-longo",
+            benchmark._sanitizar_texto_seguro(
+                mensagem_longa,
+                ("segredo-conhecido-longo",),
+            ),
+        )
+
+    def test_falha_de_escrita_no_log_encerra_subprocesso_ativo(self) -> None:
+        class LogComFalha(StringIO):
+            def write(self, _texto: str) -> int:
+                raise OSError("disco indisponivel")
+
+        codigo = "import time; print('antes da falha', flush=True); time.sleep(30)"
+        inicio = time.monotonic()
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            with self.assertRaises(benchmark.ErroCapturaFluxo) as contexto:
+                benchmark.executar_pipeline(
+                    [sys.executable, "-u", "-c", codigo],
+                    ambiente=os.environ.copy(),
+                    arquivo_log=LogComFalha(),
+                )
+
+        self.assertLess(time.monotonic() - inicio, 5)
+        self.assertIsInstance(contexto.exception.__cause__, OSError)
+        self.assertIn("stdout", str(contexto.exception))
+        self.assertIn("disco indisponivel", str(contexto.exception))
+
+    def test_falha_de_leitura_encerra_processo_e_finaliza_as_threads(self) -> None:
+        class FluxoControlado:
+            def __init__(
+                self, finalizado: threading.Event, *, falhar: bool = False
+            ) -> None:
+                self.finalizado = finalizado
+                self.falhar = falhar
+                self.fechado = threading.Event()
+
+            def readline(self) -> str:
+                if self.falhar:
+                    self.falhar = False
+                    raise OSError("pipe ilegivel")
+                self.finalizado.wait()
+                return ""
+
+            def close(self) -> None:
+                self.fechado.set()
+
+        class ProcessoAtivo:
+            def __init__(self, fluxo_com_falha: str) -> None:
+                self.finalizado = threading.Event()
+                self.stdout = FluxoControlado(
+                    self.finalizado, falhar=fluxo_com_falha == "stdout"
+                )
+                self.stderr = FluxoControlado(
+                    self.finalizado, falhar=fluxo_com_falha == "stderr"
+                )
+                self.returncode = None
+                self.terminado = False
+
+            def poll(self):
+                return self.returncode
+
+            def terminate(self) -> None:
+                self.terminado = True
+                self.returncode = -15
+                self.finalizado.set()
+
+            def wait(self, timeout=None):
+                if not self.finalizado.wait(timeout):
+                    raise subprocess.TimeoutExpired(["pipeline"], timeout)
+                return self.returncode
+
+            def kill(self) -> None:
+                self.returncode = -9
+                self.finalizado.set()
+
+        for nome_fluxo in ("stdout", "stderr"):
+            with self.subTest(nome_fluxo=nome_fluxo):
+                processo = ProcessoAtivo(nome_fluxo)
+                with mock.patch.object(
+                    benchmark.subprocess, "Popen", return_value=processo
+                ):
+                    with self.assertRaises(benchmark.ErroCapturaFluxo) as contexto:
+                        benchmark.executar_pipeline(
+                            ["pipeline"],
+                            ambiente={},
+                            arquivo_log=StringIO(),
+                        )
+
+                self.assertTrue(processo.terminado)
+                self.assertTrue(processo.stdout.fechado.is_set())
+                self.assertTrue(processo.stderr.fechado.is_set())
+                self.assertIn(nome_fluxo, str(contexto.exception))
+                self.assertIsInstance(contexto.exception.__cause__, OSError)
+
+    def test_falhas_de_terminate_e_kill_nao_bloqueiam_join(self) -> None:
+        class Fluxo:
+            def __init__(
+                self, finalizado: threading.Event, *, falhar: bool = False
+            ) -> None:
+                self.finalizado = finalizado
+                self.falhar = falhar
+                self.fechado = threading.Event()
+
+            def readline(self) -> str:
+                if self.falhar:
+                    self.falhar = False
+                    raise OSError("falha de leitura")
+                self.finalizado.wait()
+                return ""
+
+            def close(self) -> None:
+                self.fechado.set()
+
+        class ProcessoIncontrolavel:
+            def __init__(self) -> None:
+                self.finalizado = threading.Event()
+                self.stdout = Fluxo(self.finalizado, falhar=True)
+                self.stderr = Fluxo(self.finalizado)
+                self.returncode = None
+
+            def poll(self):
+                return self.returncode
+
+            def terminate(self) -> None:
+                raise OSError("terminate recusado")
+
+            def kill(self) -> None:
+                raise OSError("kill recusado")
+
+            def wait(self, timeout=None):
+                raise subprocess.TimeoutExpired(["pipeline"], timeout)
+
+        processo = ProcessoIncontrolavel()
+        inicio = time.monotonic()
+        with mock.patch.object(
+            benchmark.subprocess, "Popen", return_value=processo
+        ), mock.patch.object(benchmark, "TEMPO_LIMITE_THREAD_S", 0.01):
+            with self.assertRaises(benchmark.ErroCapturaFluxo) as contexto:
+                benchmark.executar_pipeline(
+                    ["pipeline"],
+                    ambiente={},
+                    arquivo_log=StringIO(),
+                )
+
+        self.assertLess(time.monotonic() - inicio, 1)
+        notas = "\n".join(getattr(contexto.exception, "__notes__", ()))
+        self.assertIn("Não foi possível confirmar o encerramento", notas)
+        self.assertIn("permanecerão daemon", notas)
+        threads_ativas = [
+            thread
+            for thread in threading.enumerate()
+            if thread.name in {"benchmark-stdout", "benchmark-stderr"}
+        ]
+        self.assertTrue(threads_ativas)
+        self.assertTrue(all(thread.daemon for thread in threads_ativas))
+
+        processo.finalizado.set()
+        self.assertTrue(processo.stderr.fechado.wait(1))
+
+    def test_codigo_de_saida_diferente_de_zero_continua_sendo_propagado(self) -> None:
+        with self.assertRaises(subprocess.CalledProcessError) as contexto:
+            benchmark.executar_pipeline(
+                [sys.executable, "-u", "-c", "raise SystemExit(7)"],
+                ambiente=os.environ.copy(),
+                arquivo_log=StringIO(),
+            )
+
+        self.assertEqual(contexto.exception.returncode, 7)
+
+    def test_campanha_interrompida_preserva_log_e_metadados(self) -> None:
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = Path(temporario) / "campanha"
+            campanha.mkdir()
+
+            def interromper(_comando, **kwargs):
+                kwargs["arquivo_log"].write("saida antes da interrupcao\n")
+                raise KeyboardInterrupt()
+
+            argumentos = [
+                "benchmark.py", "--run-id", "interrompida",
+                "--volumes", "100000", "--rodadas", "1",
+            ]
+            with mock.patch.object(sys, "argv", argumentos), mock.patch.object(
+                benchmark, "validar_git_limpo"
+            ), mock.patch.object(
+                benchmark, "criar_diretorio_campanha", return_value=campanha
+            ), mock.patch.object(
+                benchmark, "obter_commit_git", return_value="abc123"
+            ), mock.patch.object(
+                benchmark, "executar_pipeline", side_effect=interromper
+            ):
+                with self.assertRaises(KeyboardInterrupt):
+                    benchmark.main()
+
+            metadados = json.loads(
+                (campanha / "campanha.json").read_text(encoding="utf-8")
+            )
+            log = (campanha / "campanha.log").read_text(encoding="utf-8")
+
+        self.assertEqual(metadados["status"], "interrompida")
+        self.assertEqual(metadados["execucoes_concluidas"], 0)
+        self.assertIn("=== 1/16 | aquecimento |", log)
+        self.assertIn("saida antes da interrupcao", log)
+        self.assertIn("KeyboardInterrupt", log)
+
+    def test_falha_de_captura_marca_campanha_como_falhou(self) -> None:
+        def falhar_com_log_indisponivel(_comando, **kwargs) -> None:
+            kwargs["arquivo_log"].close()
+            raise benchmark.ErroCapturaFluxo(
+                "Falha ao capturar stdout do subprocesso: disco indisponivel"
+            )
+
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = Path(temporario) / "campanha"
+            campanha.mkdir()
+            erro_terminal = StringIO()
+            argumentos = [
+                "benchmark.py", "--run-id", "captura_falhou",
+                "--volumes", "100000", "--rodadas", "1",
+            ]
+            with mock.patch.object(sys, "argv", argumentos), mock.patch.object(
+                benchmark, "validar_git_limpo"
+            ), mock.patch.object(
+                benchmark, "criar_diretorio_campanha", return_value=campanha
+            ), mock.patch.object(
+                benchmark, "obter_commit_git", return_value="abc123"
+            ), mock.patch.object(
+                benchmark,
+                "executar_pipeline",
+                side_effect=falhar_com_log_indisponivel,
+            ), redirect_stderr(erro_terminal):
+                with self.assertRaises(benchmark.ErroCapturaFluxo):
+                    benchmark.main()
+
+            metadados = json.loads(
+                (campanha / "campanha.json").read_text(encoding="utf-8")
+            )
+            log = (campanha / "campanha.log").read_text(encoding="utf-8")
+
+        self.assertEqual(metadados["status"], "falhou")
+        self.assertEqual(metadados["execucoes_concluidas"], 0)
+        self.assertEqual(metadados["erro"]["tipo"], "ErroCapturaFluxo")
+        self.assertIn("disco indisponivel", metadados["erro"]["mensagem"])
+        self.assertIn("disco indisponivel", erro_terminal.getvalue())
+        self.assertIn("disco indisponivel", log)
+
+    def test_falha_antes_da_campanha_e_comunicada_uma_vez_pela_cli(self) -> None:
+        erro_terminal = StringIO()
+        erro = RuntimeError("falha inicial password=segredo-ficticio")
+        argumentos = [
+            "benchmark.py", "--run-id", "falha_pre_campanha",
+            "--volumes", "100000", "--rodadas", "1",
+        ]
+        with mock.patch.object(sys, "argv", argumentos), mock.patch.object(
+            benchmark, "validar_git_limpo", side_effect=erro
+        ), mock.patch.object(
+            benchmark, "criar_diretorio_campanha"
+        ) as criar, redirect_stderr(erro_terminal):
+            with self.assertRaises(SystemExit) as contexto:
+                benchmark._executar_cli()
+
+        criar.assert_not_called()
+        self.assertEqual(contexto.exception.code, 1)
+        self.assertNotIn("segredo-ficticio", erro_terminal.getvalue())
+        self.assertIn("RuntimeError", erro_terminal.getvalue())
+        self.assertEqual(erro_terminal.getvalue().count("RuntimeError"), 1)
+
+    def test_keyboard_interrupt_antes_da_campanha_preserva_codigo_130(self) -> None:
+        erro_terminal = StringIO()
+        with mock.patch.object(
+            benchmark, "main", side_effect=KeyboardInterrupt
+        ), redirect_stderr(erro_terminal):
+            with self.assertRaises(SystemExit) as contexto:
+                benchmark._executar_cli()
+
+        self.assertEqual(contexto.exception.code, 130)
+        self.assertIn("KeyboardInterrupt", erro_terminal.getvalue())
+
+    def test_falha_na_inicializacao_persiste_json_e_log_quando_disponiveis(
+        self,
+    ) -> None:
+        salvar_original = benchmark.salvar_metadados
+        chamadas = 0
+
+        def falhar_na_primeira_gravacao(caminho, metadados) -> None:
+            nonlocal chamadas
+            chamadas += 1
+            if chamadas == 1:
+                raise OSError("falha inicial password=segredo-inicializacao")
+            salvar_original(caminho, metadados)
+
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = Path(temporario) / "campanha"
+            campanha.mkdir()
+            erro_terminal = StringIO()
+            argumentos = [
+                "benchmark.py", "--run-id", "falha_inicializacao",
+                "--volumes", "100000", "--rodadas", "1",
+            ]
+            with mock.patch.object(sys, "argv", argumentos), mock.patch.object(
+                benchmark, "validar_git_limpo"
+            ), mock.patch.object(
+                benchmark, "criar_diretorio_campanha", return_value=campanha
+            ), mock.patch.object(
+                benchmark, "obter_commit_git", return_value="abc123"
+            ), mock.patch.object(
+                benchmark, "salvar_metadados", side_effect=falhar_na_primeira_gravacao
+            ), mock.patch.object(
+                benchmark, "executar_pipeline"
+            ) as executar, redirect_stderr(erro_terminal):
+                with self.assertRaises(OSError):
+                    benchmark.main()
+
+            metadados = json.loads(
+                (campanha / "campanha.json").read_text(encoding="utf-8")
+            )
+            log = (campanha / "campanha.log").read_text(encoding="utf-8")
+
+        executar.assert_not_called()
+        self.assertEqual(metadados["status"], "falhou")
+        self.assertEqual(metadados["erro"]["contexto"], "inicializacao_campanha")
+        for destino in (json.dumps(metadados), log, erro_terminal.getvalue()):
+            self.assertNotIn("segredo-inicializacao", destino)
+            self.assertIn("OSError", destino)
 
     def test_campanha_completa_simulada_tem_um_aquecimento_e_cinco_rodadas(self) -> None:
         with tempfile.TemporaryDirectory() as temporario:
@@ -176,7 +642,7 @@ class MatrizEOrquestradorTest(unittest.TestCase):
             ), mock.patch.object(
                 benchmark, "obter_commit_git", return_value="abc123"
             ), mock.patch.object(
-                benchmark.subprocess, "run",
+                benchmark, "executar_pipeline",
                 side_effect=lambda comando, **_: comandos.append(list(comando)),
             ), mock.patch("builtins.print"):
                 benchmark.main()
@@ -220,10 +686,11 @@ class AmbienteCampanhaTest(unittest.TestCase):
         self,
         erro: BaseException,
         ambiente=None,
-    ) -> dict[str, object]:
+    ) -> tuple[dict[str, object], str, str]:
         with tempfile.TemporaryDirectory() as temporario:
             campanha = Path(temporario) / "campanha"
             campanha.mkdir()
+            erro_terminal = StringIO()
             argumentos = [
                 "benchmark.py", "--run-id", "erro_controlado",
                 "--volumes", "100000", "--rodadas", "1",
@@ -235,7 +702,7 @@ class AmbienteCampanhaTest(unittest.TestCase):
             ), mock.patch.object(
                 benchmark, "obter_commit_git", return_value="abc123"
             ), mock.patch.object(
-                benchmark.subprocess, "run", side_effect=erro
+                benchmark, "executar_pipeline", side_effect=erro
             ), mock.patch.object(
                 benchmark, "coletar_ambiente",
                 return_value=ambiente if ambiente is not None else {
@@ -243,11 +710,15 @@ class AmbienteCampanhaTest(unittest.TestCase):
                     "declarado_para_campanha_oficial": {},
                     "capturado_automaticamente": {},
                 },
-            ):
+            ), redirect_stderr(erro_terminal):
                 with self.assertRaises(type(erro)):
                     benchmark.main()
-            return json.loads(
-                (campanha / "campanha.json").read_text(encoding="utf-8")
+            return (
+                json.loads(
+                    (campanha / "campanha.json").read_text(encoding="utf-8")
+                ),
+                (campanha / "campanha.log").read_text(encoding="utf-8"),
+                erro_terminal.getvalue(),
             )
 
     def test_falha_inesperada_na_coleta_nao_interrompe_campanha(self) -> None:
@@ -272,7 +743,7 @@ class AmbienteCampanhaTest(unittest.TestCase):
                     "postgresql://usuario:nao-gravar@localhost/tcc"
                 ),
             ), mock.patch.object(
-                benchmark.subprocess, "run",
+                benchmark, "executar_pipeline",
                 side_effect=lambda comando, **_: comandos.append(list(comando)),
             ):
                 benchmark.main()
@@ -295,7 +766,7 @@ class AmbienteCampanhaTest(unittest.TestCase):
             "password=senha-ficticia "
             "postgresql://usuario:senha-url@localhost:5432/tcc"
         )
-        metadados = self._executar_com_erro_controlado(erro)
+        metadados, log, erro_terminal = self._executar_com_erro_controlado(erro)
 
         self.assertEqual(metadados["status"], "falhou")
         registro_erro = metadados["erro"]
@@ -304,6 +775,25 @@ class AmbienteCampanhaTest(unittest.TestCase):
         self.assertNotIn("senha-ficticia", json.dumps(metadados))
         self.assertNotIn("senha-url", json.dumps(metadados))
         self.assertNotIn("postgresql://", registro_erro["mensagem"])
+        self.assertIn("Campanha: erro_controlado", log)
+        self.assertIn("RuntimeError", log)
+        for destino in (log, erro_terminal):
+            self.assertNotIn("senha-ficticia", destino)
+            self.assertNotIn("senha-url", destino)
+            self.assertNotIn("postgresql://", destino)
+            self.assertIn("RuntimeError", destino)
+
+    def test_traceback_redige_valor_sensivel_conhecido_do_ambiente(self) -> None:
+        segredo = "segredo-isolado-do-ambiente"
+        with mock.patch.dict(os.environ, {"POSTGRES_PASSWORD": segredo}):
+            metadados, log, erro_terminal = self._executar_com_erro_controlado(
+                RuntimeError(f"falha usando {segredo}")
+            )
+
+        self.assertEqual(metadados["status"], "falhou")
+        for destino in (json.dumps(metadados), log, erro_terminal):
+            self.assertNotIn(segredo, destino)
+            self.assertIn("<valor_redigido>", destino)
 
     def test_coleta_ambiente_preserva_origem_e_nao_expoe_credenciais(self) -> None:
         with mock.patch.object(
@@ -583,6 +1073,12 @@ class EquivalenciaFluxoTest(unittest.TestCase):
         valores = {campo: 1.0 for campo in modulo.CAMPOS_RECURSOS}
         valores["cpu_times_status"] = "valida"
         monitor.parar_com_cpu_times.return_value = valores
+        monitor.diagnostico_ram_amostras.return_value = {
+            "total": 4,
+            "validas": 3,
+            "incompletas": 1,
+            "percentual_incompletas": 25.0,
+        }
         return monitor
 
     def _fluxo_enem_etl(self, monitorar: bool) -> list[str]:
@@ -719,6 +1215,70 @@ class EquivalenciaFluxoTest(unittest.TestCase):
         self.assertEqual(self._fluxo_enem_elt(False), self._fluxo_enem_elt(True))
         self.assertEqual(self._fluxo_tse_etl(False), self._fluxo_tse_etl(True))
         self.assertEqual(self._fluxo_tse_elt(False), self._fluxo_tse_elt(True))
+
+    def test_diagnostico_ram_e_emitido_uma_vez_nos_quatro_pipelines(self) -> None:
+        prefixo = "RAM_AMOSTRAS_JSON="
+        esperado = {
+            "total": 4,
+            "validas": 3,
+            "incompletas": 1,
+            "percentual_incompletas": 25.0,
+        }
+        for fluxo in (
+            self._fluxo_enem_etl,
+            self._fluxo_enem_elt,
+            self._fluxo_tse_etl,
+            self._fluxo_tse_elt,
+        ):
+            with self.subTest(fluxo=fluxo.__name__):
+                saida = StringIO()
+                with redirect_stdout(saida):
+                    fluxo(True)
+                linhas = [
+                    linha for linha in saida.getvalue().splitlines()
+                    if linha.startswith(prefixo)
+                ]
+                self.assertEqual(len(linhas), 1)
+                self.assertEqual(json.loads(linhas[0][len(prefixo):]), esperado)
+
+    def test_diagnostico_ram_nao_e_emitido_sem_monitoramento(self) -> None:
+        for fluxo in (
+            self._fluxo_enem_etl,
+            self._fluxo_enem_elt,
+            self._fluxo_tse_etl,
+            self._fluxo_tse_elt,
+        ):
+            with self.subTest(fluxo=fluxo.__name__):
+                saida = StringIO()
+                with redirect_stdout(saida):
+                    fluxo(False)
+                self.assertNotIn("RAM_AMOSTRAS_JSON=", saida.getvalue())
+
+    def test_diagnostico_ram_nao_altera_formato_dos_resultados(self) -> None:
+        campos_diagnostico = {
+            "total", "validas", "incompletas", "percentual_incompletas"
+        }
+        for modulo in PIPELINES:
+            with self.subTest(modulo=modulo.__name__):
+                campos_resultado = {campo.name for campo in fields(modulo.ResultadoBenchmark)}
+                self.assertTrue(campos_diagnostico.isdisjoint(campos_resultado))
+                self.assertTrue(campos_diagnostico.isdisjoint(modulo.CAMPOS_RECURSOS))
+
+    def test_falha_ao_finalizar_monitor_nao_e_mascarada(self) -> None:
+        class FalhaMonitor(RuntimeError):
+            pass
+
+        monitor = mock.Mock()
+        falha = FalhaMonitor("falha original")
+        monitor.parar_com_cpu_times.side_effect = falha
+        saida = StringIO()
+
+        with redirect_stdout(saida), self.assertRaises(FalhaMonitor) as capturada:
+            finalizar_monitoramento_recursos(monitor)
+
+        self.assertIs(capturada.exception, falha)
+        monitor.diagnostico_ram_amostras.assert_not_called()
+        self.assertNotIn("RAM_AMOSTRAS_JSON=", saida.getvalue())
 
 
 class FronteirasTempoTest(unittest.TestCase):
