@@ -40,9 +40,15 @@ except ModuleNotFoundError:
         vincular_conexao_postgres,
     )
 try:
-    from src.benchmark_output import imprimir_resultado_benchmark
+    from src.benchmark_output import (
+        finalizar_monitoramento_recursos,
+        imprimir_resultado_benchmark,
+    )
 except ModuleNotFoundError:
-    from benchmark_output import imprimir_resultado_benchmark
+    from benchmark_output import (
+        finalizar_monitoramento_recursos,
+        imprimir_resultado_benchmark,
+    )
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -774,7 +780,7 @@ def executar(args: argparse.Namespace) -> None:
         return
 
     recursos = (
-        monitor.parar_com_cpu_times()
+        finalizar_monitoramento_recursos(monitor)
         if monitor is not None
         else {campo: None for campo in CAMPOS_RECURSOS}
     )

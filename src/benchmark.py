@@ -6,12 +6,16 @@ import importlib.metadata
 import json
 import os
 import platform
+import queue
 from pathlib import Path
 import random
 import re
 import struct
 import subprocess
 import sys
+import threading
+import traceback
+from typing import TextIO
 from urllib.parse import unquote, urlsplit
 
 import psycopg2
@@ -64,10 +68,20 @@ PADRAO_URL_CREDENCIAL = re.compile(
     r"(?i)\b(?:postgres(?:ql)?)(?:\+[^\s:]+)?://[^\s'\"]+"
 )
 PADRAO_CREDENCIAL = re.compile(
-    r"(?i)\b(?:[a-z0-9]+[_-])*"
-    r"(password|passwd|pwd|senha|token|secret|api[_-]?key|database[_-]?url)"
-    r"(?:\s*[:=]\s*|\s+)(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
+    r"(?i)(?P<prefix>[\"']?\b(?:[a-z0-9]+[_-])*"
+    r"(?:password|passwd|pwd|senha|token|secret|api[_-]?key|database[_-]?url)"
+    r"[\"']?(?:\s*[:=]\s*|\s+))"
+    r"(?:\"[^\"]*\"|'[^']*'|[^\s,;}\]]+)"
 )
+VARIAVEIS_AMBIENTE_SENSIVEIS = (
+    "DATABASE_URL",
+    "POSTGRES_PASSWORD",
+    "POSTGRES_URL",
+)
+MENSAGEM_SANITIZACAO_INDISPONIVEL = "<mensagem_omitida_por_falha_na_sanitizacao>"
+TAMANHO_MINIMO_SEGREDO_ISOLADO = 8
+TEMPO_LIMITE_ENCERRAMENTO_S = 5.0
+TEMPO_LIMITE_THREAD_S = 5.0
 
 
 def agora_iso() -> str:
@@ -94,25 +108,162 @@ def salvar_metadados(caminho: Path, metadados: dict[str, object]) -> None:
     temporario.replace(caminho)
 
 
-def _mensagem_erro_segura(erro: BaseException) -> str:
+def _sanitizar_texto(texto: str, valores_sensiveis: tuple[str, ...] = ()) -> str:
+    texto = PADRAO_URL_CREDENCIAL.sub("<url_postgresql_redigida>", texto)
+    texto = PADRAO_CREDENCIAL.sub(
+        lambda correspondencia: (
+            f"{correspondencia.group('prefix')}<valor_redigido>"
+        ),
+        texto,
+    )
+    for valor in sorted(set(valores_sensiveis), key=len, reverse=True):
+        if len(valor) < TAMANHO_MINIMO_SEGREDO_ISOLADO:
+            continue
+        inicio = r"(?<![a-zA-Z0-9])" if valor[0].isalnum() else ""
+        fim = r"(?![a-zA-Z0-9])" if valor[-1].isalnum() else ""
+        texto = re.sub(
+            inicio + re.escape(valor) + fim,
+            "<valor_redigido>",
+            texto,
+        )
+    return texto
+
+
+def _sanitizar_texto_seguro(
+    texto: str,
+    valores_sensiveis: tuple[str, ...] = (),
+) -> str:
+    try:
+        return _sanitizar_texto(texto, valores_sensiveis)
+    except BaseException:
+        sufixo = "\n" if texto.endswith("\n") else ""
+        return MENSAGEM_SANITIZACAO_INDISPONIVEL + sufixo
+
+
+def _valores_sensiveis_ambiente(ambiente: dict[str, str]) -> tuple[str, ...]:
+    valores = {
+        valor
+        for nome in VARIAVEIS_AMBIENTE_SENSIVEIS
+        if (valor := ambiente.get(nome))
+    }
+    for nome in ("DATABASE_URL", "POSTGRES_URL"):
+        url = ambiente.get(nome)
+        if not url:
+            continue
+        try:
+            senha = urlsplit(url).password
+        except ValueError:
+            continue
+        if senha:
+            valores.add(senha)
+            valores.add(unquote(senha))
+    return tuple(valores)
+
+
+def _mensagem_erro_segura(
+    erro: BaseException,
+    valores_sensiveis: tuple[str, ...] = (),
+) -> str:
     try:
         mensagem = str(erro)
-    except Exception:
+    except BaseException:
         return "mensagem_indisponivel"
-    mensagem = PADRAO_URL_CREDENCIAL.sub("<url_postgresql_redigida>", mensagem)
-    mensagem = PADRAO_CREDENCIAL.sub(
-        lambda correspondencia: f"{correspondencia.group(1)}=<valor_redigido>",
-        mensagem,
-    )
-    return mensagem[:500]
+    return _sanitizar_texto_seguro(mensagem, valores_sensiveis)[:500]
 
 
-def _erro_persistivel(erro: BaseException, contexto: str) -> dict[str, str]:
+def _erro_persistivel(
+    erro: BaseException,
+    contexto: str,
+    valores_sensiveis: tuple[str, ...] = (),
+) -> dict[str, str]:
     return {
         "tipo": type(erro).__name__,
         "contexto": contexto,
-        "mensagem": _mensagem_erro_segura(erro),
+        "mensagem": _mensagem_erro_segura(erro, valores_sensiveis),
     }
+
+
+def _traceback_seguro(
+    erro: BaseException,
+    valores_sensiveis: tuple[str, ...],
+) -> str:
+    try:
+        texto = "".join(traceback.format_exception(erro))
+    except BaseException:
+        return f"{type(erro).__name__}: <traceback_indisponivel>\n"
+    return _sanitizar_texto_seguro(texto, valores_sensiveis)
+
+
+def _marcar_erro_reportado(erro: BaseException) -> None:
+    try:
+        setattr(erro, "_benchmark_erro_reportado", True)
+    except BaseException:
+        pass
+
+
+def _erro_ja_reportado(erro: BaseException) -> bool:
+    try:
+        return bool(getattr(erro, "_benchmark_erro_reportado", False))
+    except BaseException:
+        return False
+
+
+def _registrar_falha_campanha(
+    erro: BaseException,
+    *,
+    valores_sensiveis: tuple[str, ...],
+    metadados: dict[str, object] | None = None,
+    metadados_caminho: Path | None = None,
+    log_caminho: Path | None = None,
+    arquivo_log: TextIO | None = None,
+    contexto: str = "execucao_pipeline",
+) -> None:
+    if metadados is not None and metadados_caminho is not None:
+        metadados["status"] = (
+            "interrompida" if isinstance(erro, KeyboardInterrupt) else "falhou"
+        )
+        metadados["fim"] = agora_iso()
+        metadados["erro"] = _erro_persistivel(
+            erro,
+            contexto,
+            valores_sensiveis,
+        )
+        try:
+            salvar_metadados(metadados_caminho, metadados)
+        except Exception as erro_metadados:
+            print(
+                "Falha adicional ao salvar campanha.json: "
+                f"{_mensagem_erro_segura(erro_metadados, valores_sensiveis)}",
+                file=sys.stderr,
+            )
+
+    texto_erro = _traceback_seguro(erro, valores_sensiveis)
+    sys.stderr.write(texto_erro)
+    sys.stderr.flush()
+
+    erro_log: BaseException | None = None
+    registrado = False
+    if arquivo_log is not None:
+        try:
+            arquivo_log.write(texto_erro)
+            arquivo_log.flush()
+            registrado = True
+        except Exception as erro_escrita:
+            erro_log = erro_escrita
+    if not registrado and log_caminho is not None:
+        try:
+            with log_caminho.open("a", encoding="utf-8", buffering=1) as log:
+                log.write(texto_erro)
+            registrado = True
+        except Exception as erro_escrita:
+            erro_log = erro_escrita
+    if not registrado and erro_log is not None:
+        print(
+            "Falha adicional ao registrar a exceção em campanha.log: "
+            f"{_mensagem_erro_segura(erro_log, valores_sensiveis)}",
+            file=sys.stderr,
+        )
+    _marcar_erro_reportado(erro)
 
 
 def _ambiente_declarado() -> dict[str, str]:
@@ -337,6 +488,203 @@ def comando(
     return argumentos
 
 
+def _registrar_mensagem(
+    arquivo_log: TextIO,
+    mensagem: str,
+    valores_sensiveis: tuple[str, ...] = (),
+) -> None:
+    texto = _sanitizar_texto_seguro(mensagem + "\n", valores_sensiveis)
+    sys.stdout.write(texto)
+    sys.stdout.flush()
+    arquivo_log.write(texto)
+    arquivo_log.flush()
+
+
+def _replicar_fluxo(
+    origem: TextIO,
+    destino: TextIO,
+    arquivo_log: TextIO,
+    lock: threading.Lock,
+    nome_fluxo: str,
+    falhas: queue.Queue[tuple[str, BaseException]],
+    valores_sensiveis: tuple[str, ...],
+) -> None:
+    try:
+        try:
+            for trecho in iter(origem.readline, ""):
+                trecho_seguro = _sanitizar_texto_seguro(trecho, valores_sensiveis)
+                with lock:
+                    destino.write(trecho_seguro)
+                    destino.flush()
+                    arquivo_log.write(trecho_seguro)
+                    arquivo_log.flush()
+        finally:
+            origem.close()
+    except BaseException as erro:
+        falhas.put((nome_fluxo, erro))
+
+
+class ErroCapturaFluxo(RuntimeError):
+    """Indica que uma thread deixou de capturar stdout ou stderr."""
+
+
+class ErroEncerramentoProcesso(RuntimeError):
+    """Indica que não foi possível confirmar o encerramento do subprocesso."""
+
+
+def _propagar_falha_captura(
+    falhas: queue.Queue[tuple[str, BaseException]],
+) -> None:
+    try:
+        nome_fluxo, erro = falhas.get_nowait()
+    except queue.Empty:
+        return
+    raise ErroCapturaFluxo(
+        f"Falha ao capturar {nome_fluxo} do subprocesso: "
+        f"{_mensagem_erro_segura(erro)}"
+    ) from erro
+
+
+def _encerrar_processo(processo: subprocess.Popen[str]) -> None:
+    """Encerra e coleta um subprocesso que ainda esteja ativo."""
+    if processo.poll() is not None:
+        return
+    falhas: list[str] = []
+    try:
+        processo.terminate()
+    except BaseException as erro:
+        falhas.append(f"terminate: {_mensagem_erro_segura(erro)}")
+    try:
+        processo.wait(timeout=TEMPO_LIMITE_ENCERRAMENTO_S)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    except BaseException as erro:
+        falhas.append(f"wait após terminate: {_mensagem_erro_segura(erro)}")
+    try:
+        processo.kill()
+    except BaseException as erro:
+        falhas.append(f"kill: {_mensagem_erro_segura(erro)}")
+    try:
+        processo.wait(timeout=TEMPO_LIMITE_ENCERRAMENTO_S)
+        return
+    except subprocess.TimeoutExpired:
+        falhas.append("timeout após kill")
+    except BaseException as erro:
+        falhas.append(f"wait após kill: {_mensagem_erro_segura(erro)}")
+    if processo.poll() is not None:
+        return
+    detalhes = "; ".join(falhas) if falhas else "processo permaneceu ativo"
+    raise ErroEncerramentoProcesso(
+        "Não foi possível confirmar o encerramento do subprocesso: " + detalhes
+    )
+
+
+def executar_pipeline(
+    argumentos: list[str],
+    *,
+    ambiente: dict[str, str],
+    arquivo_log: TextIO,
+) -> None:
+    """Executa um pipeline e replica stdout/stderr incrementalmente no log."""
+    valores_sensiveis = _valores_sensiveis_ambiente(ambiente)
+    processo = subprocess.Popen(
+        argumentos,
+        cwd=BASE_DIR,
+        env=ambiente,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+    )
+    assert processo.stdout is not None
+    assert processo.stderr is not None
+    lock = threading.Lock()
+    falhas: queue.Queue[tuple[str, BaseException]] = queue.Queue()
+    threads = [
+        threading.Thread(
+            target=_replicar_fluxo,
+            args=(
+                processo.stdout,
+                sys.stdout,
+                arquivo_log,
+                lock,
+                "stdout",
+                falhas,
+                valores_sensiveis,
+            ),
+            name="benchmark-stdout",
+            daemon=True,
+        ),
+        threading.Thread(
+            target=_replicar_fluxo,
+            args=(
+                processo.stderr,
+                sys.stderr,
+                arquivo_log,
+                lock,
+                "stderr",
+                falhas,
+                valores_sensiveis,
+            ),
+            name="benchmark-stderr",
+            daemon=True,
+        ),
+    ]
+    threads_iniciadas: list[threading.Thread] = []
+    falha_execucao: BaseException | None = None
+    try:
+        for thread in threads:
+            thread.start()
+            threads_iniciadas.append(thread)
+        while processo.poll() is None:
+            try:
+                nome_fluxo, erro = falhas.get(timeout=0.05)
+            except queue.Empty:
+                continue
+            raise ErroCapturaFluxo(
+                f"Falha ao capturar {nome_fluxo} do subprocesso: "
+                f"{_mensagem_erro_segura(erro)}"
+            ) from erro
+        codigo = processo.returncode
+    except BaseException as erro:
+        falha_execucao = erro
+        try:
+            _encerrar_processo(processo)
+        except BaseException as erro_encerramento:
+            erro.add_note(
+                "Falha adicional ao encerrar o subprocesso: "
+                f"{_mensagem_erro_segura(erro_encerramento)}"
+            )
+        raise
+    finally:
+        for thread in threads_iniciadas:
+            thread.join(timeout=TEMPO_LIMITE_THREAD_S)
+        threads_ativas = [thread for thread in threads_iniciadas if thread.is_alive()]
+        for thread, fluxo in zip(threads, (processo.stdout, processo.stderr)):
+            if thread.is_alive():
+                continue
+            try:
+                fluxo.close()
+            except Exception:
+                pass
+        if threads_ativas:
+            nomes = ", ".join(thread.name for thread in threads_ativas)
+            mensagem = (
+                "Threads de captura não finalizaram no prazo e permanecerão daemon: "
+                + nomes
+            )
+            if falha_execucao is not None:
+                falha_execucao.add_note(mensagem)
+            else:
+                raise ErroCapturaFluxo(mensagem)
+    _propagar_falha_captura(falhas)
+    if codigo != 0:
+        raise subprocess.CalledProcessError(codigo, argumentos)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Orquestra a campanha global e randomizada de ENEM e TSE."
@@ -381,20 +729,45 @@ def main() -> None:
         campanha_dir = criar_diretorio_campanha(run_id)
     except FileExistsError as erro:
         parser.error(str(erro))
-    criar_diretorios_modalidades(campanha_dir)
-
     metadados_caminho = campanha_dir / "campanha.json"
+    log_caminho = campanha_dir / "campanha.log"
+    valores_sensiveis: tuple[str, ...] = ()
+    try:
+        criar_diretorios_modalidades(campanha_dir)
+        log_caminho.touch()
+        with log_caminho.open("a", encoding="utf-8", buffering=1) as arquivo_log:
+            _registrar_mensagem(arquivo_log, f"Campanha: {run_id}")
+            _registrar_mensagem(arquivo_log, f"Seed: {args.seed}")
+        load_dotenv(BASE_DIR / ".env")
+    except BaseException as erro:
+        _registrar_falha_campanha(
+            erro,
+            valores_sensiveis=valores_sensiveis,
+            log_caminho=log_caminho,
+            contexto="inicializacao_campanha",
+        )
+        raise
 
-    load_dotenv(BASE_DIR / ".env")
+    valores_sensiveis = _valores_sensiveis_ambiente(dict(os.environ))
     try:
         ambiente_metadados = coletar_ambiente()
     except Exception as erro:
         ambiente_metadados = _ambiente_indisponivel(erro)
+    except BaseException as erro:
+        _registrar_falha_campanha(
+            erro,
+            valores_sensiveis=valores_sensiveis,
+            log_caminho=log_caminho,
+            contexto="inicializacao_campanha",
+        )
+        raise
     ambiente = os.environ.copy()
     ambiente["BENCHMARK_RUN_ID"] = run_id
     ambiente["BENCHMARK_OUTPUT_DIR"] = str(campanha_dir)
     ambiente["BENCHMARK_ORCHESTRATOR_RUN_ID"] = run_id
     ambiente["PYTHONIOENCODING"] = "utf-8"
+    ambiente["PYTHONUNBUFFERED"] = "1"
+    valores_sensiveis = _valores_sensiveis_ambiente(ambiente)
     rng = random.Random(args.seed)
     cenarios = [
         (modalidade, dataset, volume, arquitetura)
@@ -408,17 +781,25 @@ def main() -> None:
         *[("medir", rodada) for rodada in range(1, args.rodadas + 1)],
     ]
 
-    print(f"Campanha: {run_id}")
-    print(f"Seed: {args.seed}")
     total = len(cenarios) * len(fases)
     aquecimentos = len(cenarios)
     medicoes_validas = len(cenarios) * args.rodadas
+    try:
+        commit_git = obter_commit_git()
+    except BaseException as erro:
+        _registrar_falha_campanha(
+            erro,
+            valores_sensiveis=valores_sensiveis,
+            log_caminho=log_caminho,
+            contexto="inicializacao_campanha",
+        )
+        raise
     metadados: dict[str, object] = {
         "run_id": run_id,
         "status": "em_andamento",
         "inicio": agora_iso(),
         "fim": None,
-        "commit_git": obter_commit_git(),
+        "commit_git": commit_git,
         "ambiente": ambiente_metadados,
         "seed": args.seed,
         "datasets": list(DATASETS),
@@ -471,39 +852,105 @@ def main() -> None:
         "execucoes_previstas": total,
         "execucoes_concluidas": 0,
     }
-    salvar_metadados(metadados_caminho, metadados)
+    try:
+        salvar_metadados(metadados_caminho, metadados)
+    except BaseException as erro:
+        _registrar_falha_campanha(
+            erro,
+            valores_sensiveis=valores_sensiveis,
+            metadados=metadados,
+            metadados_caminho=metadados_caminho,
+            log_caminho=log_caminho,
+            contexto="inicializacao_campanha",
+        )
+        raise
     indice = 0
     try:
-        for modo, rodada in fases:
-            ordem = cenarios.copy()
-            rng.shuffle(ordem)
-            for modalidade, dataset, volume, arquitetura in ordem:
-                indice += 1
-                print(
-                    f"\n=== {indice}/{total} | {modo} | {dataset.upper()} | "
-                    f"{modalidade.upper()} | {volume} | {arquitetura.upper()} ==="
-                )
-                subprocess.run(
-                    comando(modalidade, dataset, arquitetura, volume, modo, rodada),
-                    cwd=BASE_DIR,
-                    env=ambiente,
-                    check=True,
-                )
-                metadados["execucoes_concluidas"] = indice
-                salvar_metadados(metadados_caminho, metadados)
+        arquivo_log = log_caminho.open("a", encoding="utf-8", buffering=1)
     except BaseException as erro:
-        metadados["status"] = (
-            "interrompida" if isinstance(erro, KeyboardInterrupt) else "falhou"
+        _registrar_falha_campanha(
+            erro,
+            valores_sensiveis=valores_sensiveis,
+            metadados=metadados,
+            metadados_caminho=metadados_caminho,
+            log_caminho=log_caminho,
+            contexto="inicializacao_campanha",
         )
-        metadados["fim"] = agora_iso()
-        metadados["erro"] = _erro_persistivel(erro, "execucao_pipeline")
-        salvar_metadados(metadados_caminho, metadados)
         raise
+    with arquivo_log:
+        try:
+            for modo, rodada in fases:
+                ordem = cenarios.copy()
+                rng.shuffle(ordem)
+                for modalidade, dataset, volume, arquitetura in ordem:
+                    indice += 1
+                    _registrar_mensagem(
+                        arquivo_log,
+                        f"\n=== {indice}/{total} | {modo} | {dataset.upper()} | "
+                        f"{modalidade.upper()} | {volume} | {arquitetura.upper()} ===",
+                    )
+                    executar_pipeline(
+                        comando(
+                            modalidade,
+                            dataset,
+                            arquitetura,
+                            volume,
+                            modo,
+                            rodada,
+                        ),
+                        ambiente=ambiente,
+                        arquivo_log=arquivo_log,
+                    )
+                    metadados["execucoes_concluidas"] = indice
+                    salvar_metadados(metadados_caminho, metadados)
+        except BaseException as erro:
+            _registrar_falha_campanha(
+                erro,
+                valores_sensiveis=valores_sensiveis,
+                metadados=metadados,
+                metadados_caminho=metadados_caminho,
+                log_caminho=log_caminho,
+                arquivo_log=arquivo_log,
+            )
+            raise
 
     metadados["status"] = "concluida"
     metadados["fim"] = agora_iso()
-    salvar_metadados(metadados_caminho, metadados)
+    try:
+        salvar_metadados(metadados_caminho, metadados)
+    except BaseException as erro:
+        _registrar_falha_campanha(
+            erro,
+            valores_sensiveis=valores_sensiveis,
+            metadados=metadados,
+            metadados_caminho=metadados_caminho,
+            log_caminho=log_caminho,
+            contexto="finalizacao_campanha",
+        )
+        raise
+
+
+def _executar_cli() -> None:
+    try:
+        main()
+    except SystemExit as erro:
+        if isinstance(erro.code, str):
+            valores = _valores_sensiveis_ambiente(dict(os.environ))
+            raise SystemExit(_sanitizar_texto_seguro(erro.code, valores)) from None
+        raise
+    except KeyboardInterrupt as erro:
+        if not _erro_ja_reportado(erro):
+            valores = _valores_sensiveis_ambiente(dict(os.environ))
+            sys.stderr.write(_traceback_seguro(erro, valores))
+            sys.stderr.flush()
+        raise SystemExit(130) from None
+    except BaseException as erro:
+        if not _erro_ja_reportado(erro):
+            valores = _valores_sensiveis_ambiente(dict(os.environ))
+            sys.stderr.write(_traceback_seguro(erro, valores))
+            sys.stderr.flush()
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":
-    main()
+    _executar_cli()
