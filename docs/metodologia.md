@@ -482,6 +482,23 @@ Throughput = quantidade de registros processados / tempo total
 
 A unidade principal será registros por segundo.
 
+Nas rodadas individuais, o throughput continua sendo registrado como a
+quantidade efetiva de registros de entrada dividida pelo `tempo_total` da
+própria rodada. Na consolidação estatística da modalidade `desempenho`, o
+throughput oficial não é a média aritmética desses cinco valores. Ele é
+recalculado por cenário a partir da quantidade efetiva, que deve permanecer
+constante nas cinco rodadas e ser igual entre ETL e ELT para o mesmo dataset e
+volume:
+
+```text
+Throughput consolidado = quantidade efetiva de registros / média dos cinco tempos totais
+```
+
+Os throughputs individuais permanecem disponíveis e têm média, desvio-padrão
+amostral, mediana e coeficiente de variação calculados separadamente como
+estatísticas descritivas. Nenhum dado da modalidade `recursos` participa do
+throughput consolidado.
+
 ### CPU
 
 Serão registrados:
@@ -1001,8 +1018,12 @@ Os campos de memória disponível do sistema também permanecem nos CSVs de
 métricas de USS.
 
 Na análise estatística, a modalidade `desempenho` consolidará `tempo_total` e
-`throughput`, podendo apresentar os tempos por etapa como indicadores
-diagnósticos. A modalidade `recursos` consolidará CPU média e de pico e RAM
+calculará `throughput_consolidado` pela quantidade efetiva de registros dividida
+pela média dos cinco tempos totais. As colunas `throughput_media`,
+`throughput_desvio_padrao`, `throughput_mediana` e `throughput_cv` descreverão
+exclusivamente a distribuição dos throughputs individuais, sem serem usadas
+como substitutas do throughput consolidado. Os tempos por etapa poderão ser
+apresentados como indicadores diagnósticos. A modalidade `recursos` consolidará CPU média e de pico e RAM
 média e de pico usando os campos totais presentes nos CSVs; quando disponíveis,
 as métricas separadas de Python e PostgreSQL também serão consolidadas. Os
 tempos e o throughput dos CSVs de `recursos` não serão usados como resultados
@@ -1019,7 +1040,9 @@ data/benchmark/campanhas/<run_id>/analise/comparacao_etl_elt.csv
 
 Os dois primeiros terão uma linha por dataset, volume e arquitetura, com as
 colunas de média, desvio-padrão amostral, mediana e número de execuções para
-cada métrica. A tabela de
+cada métrica. `analise_desempenho.csv` também registrará
+`quantidade_registros` e `throughput_consolidado`, distinguindo o resultado
+oficial das estatísticas descritivas dos valores individuais. A tabela de
 comparação terá uma linha por dataset e volume, as três estatísticas de
 `tempo_total` de ETL e ELT e `reducao_tempo_pct`, calculada a partir das médias.
 Essa comparação descreve diferenças observadas e não constitui teste de

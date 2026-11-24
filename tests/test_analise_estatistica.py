@@ -9,7 +9,10 @@ from src.analise_estatistica import AnaliseError, analisar_campanha
 
 IDENTITY = ["run_id", "modalidade", "dataset", "volume_configurado", "arquitetura", "rodada"]
 RESOURCE = ["cpu_media_total", "cpu_pico_total", "ram_media_total_mb", "ram_pico_total_mb"]
-PERFORMANCE = ["tempo_total", "throughput", "tempo_leitura", "tempo_transformacao", "tempo_carga"]
+PERFORMANCE = [
+    "tempo_total", "throughput", "tempo_leitura", "tempo_transformacao",
+    "tempo_carga", "quantidade_registros",
+]
 SEPARATED_RESOURCE = ["cpu_media_python", "cpu_pico_python", "ram_media_python_mb", "ram_pico_python_mb", "cpu_media_postgres", "cpu_pico_postgres", "ram_media_postgres_mb", "ram_pico_postgres_mb"]
 CPU_TIMES = [
     "cpu_times_python_s", "cpu_times_postgres_s", "cpu_times_total_s",
@@ -52,7 +55,14 @@ class TestAnaliseEstatistica(unittest.TestCase):
                                      "dataset": dataset, "volume_configurado": str(volume),
                                      "arquitetura": arquitetura, "rodada": rodada}
                             if modalidade == "desempenho":
-                                linha.update(tempo_total=str(fator).replace(".", ","), throughput="100", tempo_leitura="1", tempo_transformacao="2", tempo_carga="3")
+                                linha.update(
+                                    tempo_total=str(fator).replace(".", ","),
+                                    throughput="100",
+                                    tempo_leitura="1",
+                                    tempo_transformacao="2",
+                                    tempo_carga="3",
+                                    quantidade_registros=str(volume * 2),
+                                )
                             else:
                                 linha.update(cpu_media_total="10", cpu_pico_total="20", ram_media_total_mb="30", ram_pico_total_mb="40")
                                 if separated:
@@ -90,6 +100,15 @@ class TestAnaliseEstatistica(unittest.TestCase):
             self.assertAlmostEqual(float(etl["tempo_total_desvio_padrao"].replace(",", ".")), 1.5811, places=3)
             self.assertEqual(float(etl["tempo_total_mediana"].replace(",", ".")), 4.0)
             self.assertAlmostEqual(float(etl["tempo_total_cv"].replace(",", ".")), 39.52847075, places=5)
+            self.assertEqual(float(etl["throughput_media"].replace(",", ".")), 100.0)
+            self.assertEqual(float(etl["throughput_desvio_padrao"].replace(",", ".")), 0.0)
+            self.assertEqual(float(etl["throughput_mediana"].replace(",", ".")), 100.0)
+            self.assertEqual(float(etl["throughput_cv"].replace(",", ".")), 0.0)
+            self.assertEqual(etl["quantidade_registros"], "200000")
+            self.assertEqual(
+                float(etl["throughput_consolidado"].replace(",", ".")),
+                50_000.0,
+            )
             with (destino / "comparacao_etl_elt.csv").open(encoding="utf-8", newline="") as arquivo:
                 comparacao = next(csv.DictReader(arquivo, delimiter=";"))
             self.assertAlmostEqual(float(comparacao["variacao_tempo_pct"].replace(",", ".")), 25.0, places=3)
@@ -168,11 +187,11 @@ class TestAnaliseEstatistica(unittest.TestCase):
             caminho = campanha / "desempenho" / "enem_etl.csv"
             with caminho.open("a", encoding="utf-8", newline="") as arquivo:
                 escritor = csv.writer(arquivo, delimiter=";")
-                escritor.writerow(["campanha_teste", "desempenho", "enem", "100000", "etl", "aquecimento", "1", "1", "1", "1", "1"])
+                escritor.writerow(["campanha_teste", "desempenho", "enem", "100000", "etl", "aquecimento", "1", "1", "1", "1", "1", "200000"])
             analisar_campanha("campanha_teste", Path(temporario))
             with caminho.open("a", encoding="utf-8", newline="") as arquivo:
                 escritor = csv.writer(arquivo, delimiter=";")
-                escritor.writerow(["campanha_teste", "desempenho", "enem", "100000", "etl", "1", "1", "1", "1", "1", "1"])
+                escritor.writerow(["campanha_teste", "desempenho", "enem", "100000", "etl", "1", "1", "1", "1", "1", "1", "200000"])
             with self.assertRaises(AnaliseError):
                 analisar_campanha("campanha_teste", Path(temporario))
 
@@ -266,6 +285,68 @@ class TestAnaliseEstatistica(unittest.TestCase):
                 escritor.writerows(linhas)
             with self.assertRaisesRegex(AnaliseError, "throughput deve ser positivo"):
                 analisar_campanha("campanha_teste", Path(temporario))
+
+    def test_tempo_total_nao_finito_falha(self):
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = self._criar_campanha(Path(temporario))
+            caminho = campanha / "desempenho" / "enem_etl.csv"
+            with caminho.open(encoding="utf-8", newline="") as arquivo:
+                linhas = list(csv.DictReader(arquivo, delimiter=";"))
+                campos = list(linhas[0])
+            linhas[0]["tempo_total"] = "nan"
+            with caminho.open("w", encoding="utf-8", newline="") as arquivo:
+                escritor = csv.DictWriter(arquivo, fieldnames=campos, delimiter=";")
+                escritor.writeheader()
+                escritor.writerows(linhas)
+            with self.assertRaisesRegex(AnaliseError, "valor numérico inválido em tempo_total"):
+                analisar_campanha("campanha_teste", Path(temporario))
+
+    def test_quantidade_deve_ser_constante_nas_rodadas(self):
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = self._criar_campanha(Path(temporario))
+            caminho = campanha / "desempenho" / "enem_etl.csv"
+            with caminho.open(encoding="utf-8", newline="") as arquivo:
+                linhas = list(csv.DictReader(arquivo, delimiter=";"))
+                campos = list(linhas[0])
+            linhas[0]["quantidade_registros"] = "200001"
+            with caminho.open("w", encoding="utf-8", newline="") as arquivo:
+                escritor = csv.DictWriter(arquivo, fieldnames=campos, delimiter=";")
+                escritor.writeheader()
+                escritor.writerows(linhas)
+            with self.assertRaisesRegex(AnaliseError, "varia entre as rodadas"):
+                analisar_campanha("campanha_teste", Path(temporario))
+
+    def test_quantidade_deve_ser_igual_entre_etl_e_elt(self):
+        with tempfile.TemporaryDirectory() as temporario:
+            campanha = self._criar_campanha(Path(temporario))
+            caminho = campanha / "desempenho" / "enem_elt.csv"
+            with caminho.open(encoding="utf-8", newline="") as arquivo:
+                linhas = list(csv.DictReader(arquivo, delimiter=";"))
+                campos = list(linhas[0])
+            for linha in linhas:
+                linha["quantidade_registros"] = "200001"
+            with caminho.open("w", encoding="utf-8", newline="") as arquivo:
+                escritor = csv.DictWriter(arquivo, fieldnames=campos, delimiter=";")
+                escritor.writeheader()
+                escritor.writerows(linhas)
+            with self.assertRaisesRegex(AnaliseError, "difere entre ETL e ELT"):
+                analisar_campanha("campanha_teste", Path(temporario))
+
+    def test_quantidade_deve_ser_inteiro_positivo(self):
+        for valor in ("0", "1,5"):
+            with self.subTest(valor=valor), tempfile.TemporaryDirectory() as temporario:
+                campanha = self._criar_campanha(Path(temporario))
+                caminho = campanha / "desempenho" / "enem_etl.csv"
+                with caminho.open(encoding="utf-8", newline="") as arquivo:
+                    linhas = list(csv.DictReader(arquivo, delimiter=";"))
+                    campos = list(linhas[0])
+                linhas[0]["quantidade_registros"] = valor
+                with caminho.open("w", encoding="utf-8", newline="") as arquivo:
+                    escritor = csv.DictWriter(arquivo, fieldnames=campos, delimiter=";")
+                    escritor.writeheader()
+                    escritor.writerows(linhas)
+                with self.assertRaisesRegex(AnaliseError, "deve ser um inteiro positivo"):
+                    analisar_campanha("campanha_teste", Path(temporario))
 
     def test_cpu_e_ram_negativas_falham(self):
         with tempfile.TemporaryDirectory() as temporario:

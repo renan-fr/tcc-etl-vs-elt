@@ -32,6 +32,7 @@ IDENTITY_FIELDS = (
     "run_id", "modalidade", "dataset", "arquitetura", "volume_configurado", "rodada"
 )
 PERFORMANCE_METRICS = ("tempo_total", "throughput")
+EFFECTIVE_RECORDS_FIELD = "quantidade_registros"
 DIAGNOSTIC_TIME_METRICS = ("tempo_leitura", "tempo_transformacao", "tempo_carga")
 RESOURCE_METRIC_ALIASES = {
     "cpu_media": ("cpu_media_total", "cpu_media"),
@@ -177,6 +178,18 @@ def _ler_modalidade(campanha: Path, modalidade: str, run_id: str) -> list[dict[s
                     "_arquivo": str(arquivo), "_linha": numero_linha, "_campos": campos,
                 }
                 if modalidade == "desempenho":
+                    quantidade = _numero(
+                        bruto.get(EFFECTIVE_RECORDS_FIELD),
+                        EFFECTIVE_RECORDS_FIELD,
+                        arquivo,
+                        numero_linha,
+                    )
+                    if quantidade <= 0 or not quantidade.is_integer():
+                        raise AnaliseError(
+                            f"{arquivo}:{numero_linha}: {EFFECTIVE_RECORDS_FIELD} "
+                            "deve ser um inteiro positivo"
+                        )
+                    registro[EFFECTIVE_RECORDS_FIELD] = int(quantidade)
                     metricas = PERFORMANCE_METRICS + DIAGNOSTIC_TIME_METRICS
                 else:
                     disponiveis = tuple(
@@ -309,6 +322,45 @@ def _validar_completude(
         raise AnaliseError("Cenários incompletos:\n" + "\n".join(erros))
 
 
+def _validar_quantidades_desempenho(registros: list[dict[str, object]]) -> None:
+    """Valida o numerador oficial do throughput sem consultar recursos."""
+    por_cenario: dict[tuple[str, int, str], set[int]] = {}
+    for registro in registros:
+        chave = (
+            str(registro["dataset"]),
+            int(registro["volume_configurado"]),
+            str(registro["arquitetura"]),
+        )
+        por_cenario.setdefault(chave, set()).add(
+            int(registro[EFFECTIVE_RECORDS_FIELD])
+        )
+
+    erros: list[str] = []
+    for (dataset, volume, arquitetura), quantidades in sorted(por_cenario.items()):
+        if len(quantidades) != 1:
+            erros.append(
+                f"desempenho: {dataset}/{volume}/{arquitetura}: "
+                "quantidade_registros varia entre as rodadas: "
+                f"{sorted(quantidades)}"
+            )
+
+    por_dataset_volume: dict[tuple[str, int], dict[str, int]] = {}
+    for (dataset, volume, arquitetura), quantidades in por_cenario.items():
+        if len(quantidades) == 1:
+            por_dataset_volume.setdefault((dataset, volume), {})[arquitetura] = next(
+                iter(quantidades)
+            )
+    for (dataset, volume), arquiteturas in sorted(por_dataset_volume.items()):
+        if set(arquiteturas) == set(ARQUITETURAS) and len(set(arquiteturas.values())) != 1:
+            erros.append(
+                f"desempenho: {dataset}/{volume}: quantidade_registros difere "
+                f"entre ETL e ELT: {arquiteturas}"
+            )
+
+    if erros:
+        raise AnaliseError("Quantidades efetivas inconsistentes:\n" + "\n".join(erros))
+
+
 def _coeficiente_variacao(media: float, desvio: float | None) -> float | None:
     if desvio is None or media == 0:
         return None
@@ -339,6 +391,45 @@ def _agrupar(registros: list[dict[str, object]], metricas: tuple[str, ...]) -> l
                 f"{metrica}_cv": cv,
             })
         saida.append(base)
+    return saida
+
+
+def _agrupar_desempenho(registros: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Consolida desempenho e distingue throughput oficial das rodadas."""
+    saida = _agrupar(
+        registros,
+        PERFORMANCE_METRICS + DIAGNOSTIC_TIME_METRICS,
+    )
+    grupos: dict[tuple[str, int, str], list[dict[str, object]]] = {}
+    for registro in registros:
+        chave = (
+            str(registro["dataset"]),
+            int(registro["volume_configurado"]),
+            str(registro["arquitetura"]),
+        )
+        grupos.setdefault(chave, []).append(registro)
+
+    por_chave = {
+        (linha["dataset"], linha["volume_configurado"], linha["arquitetura"]): linha
+        for linha in saida
+    }
+    for chave, itens in grupos.items():
+        tempos = [float(item["tempo_total"]) for item in itens]
+        if any(not math.isfinite(tempo) or tempo <= 0 for tempo in tempos):
+            raise AnaliseError(
+                f"desempenho: {chave[0]}/{chave[1]}/{chave[2]}: "
+                "tempo_total deve ser positivo e finito"
+            )
+        quantidades = {int(item[EFFECTIVE_RECORDS_FIELD]) for item in itens}
+        if len(quantidades) != 1:
+            raise AnaliseError(
+                f"desempenho: {chave[0]}/{chave[1]}/{chave[2]}: "
+                "quantidade_registros deve ser constante"
+            )
+        quantidade = next(iter(quantidades))
+        linha = por_chave[chave]
+        linha[EFFECTIVE_RECORDS_FIELD] = quantidade
+        linha["throughput_consolidado"] = quantidade / statistics.fmean(tempos)
     return saida
 
 
@@ -447,8 +538,9 @@ def analisar_campanha(run_id: str, base_dir: Path | None = None) -> Path:
     recursos = _ler_modalidade(campanha, "recursos", run_id)
     _validar_completude(desempenho, "desempenho", datasets_esperados, volumes_esperados)
     _validar_completude(recursos, "recursos", datasets_esperados, volumes_esperados)
+    _validar_quantidades_desempenho(desempenho)
     saidas = {
-        "analise_desempenho.csv": _agrupar(desempenho, PERFORMANCE_METRICS + DIAGNOSTIC_TIME_METRICS),
+        "analise_desempenho.csv": _agrupar_desempenho(desempenho),
         "analise_recursos.csv": _agrupar_recursos(
             recursos,
             tuple(RESOURCE_METRIC_ALIASES)
