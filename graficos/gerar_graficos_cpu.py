@@ -11,6 +11,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
+from matplotlib.lines import Line2D
 
 from src.benchmark_paths import diretorio_campanha, validar_run_id
 
@@ -18,6 +19,9 @@ from src.benchmark_paths import diretorio_campanha, validar_run_id
 BASE_DIR = Path(__file__).resolve().parents[1]
 CORES = {"ETL": "#2ca25f", "ELT": "#2b6cb0"}
 VOLUMES = [100_000, 250_000, 500_000, 1_000_000]
+ROTULOS_VOLUMES = ["100 mil", "250 mil", "500 mil", "1 milhão"]
+DESLOCAMENTOS = {"ETL": -0.06, "ELT": 0.06}
+JITTER = [-0.032, -0.016, 0.0, 0.016, 0.032]
 COLUNAS_OBRIGATORIAS = {
     "run_id",
     "modalidade",
@@ -107,19 +111,73 @@ def carregar_resultados(campanha_dir: Path, run_id: str) -> pd.DataFrame:
     return resultados
 
 
+def configurar_eixos(ax: plt.Axes, posicoes: list[int], rotulo_y: str) -> None:
+    ax.set_xlabel("Volume nominal (registros)")
+    ax.set_ylabel(rotulo_y)
+    ax.set_xticks(posicoes, ROTULOS_VOLUMES)
+    ax.set_ylim(bottom=0)
+    ax.yaxis.grid(True, color="#d9d9d9", linewidth=0.7)
+    ax.set_axisbelow(True)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#777777")
+    ax.spines["bottom"].set_color("#777777")
+
+
+def adicionar_legenda(ax: plt.Axes) -> None:
+    medias = [
+        Line2D(
+            [],
+            [],
+            color=CORES[arquitetura],
+            marker="o",
+            linewidth=2,
+            markersize=5,
+            label=f"{arquitetura} — média",
+        )
+        for arquitetura in ("ETL", "ELT")
+    ]
+    rodadas = Line2D(
+        [],
+        [],
+        color=CORES["ETL"],
+        marker="o",
+        linestyle="none",
+        markersize=5,
+        alpha=0.55,
+        markeredgecolor="white",
+        markeredgewidth=0.4,
+        label="rodadas individuais",
+    )
+    intervalo = ax.errorbar(
+        [float("nan")],
+        [float("nan")],
+        yerr=[[1.0], [1.0]],
+        color=CORES["ETL"],
+        linestyle="none",
+        capsize=4,
+        elinewidth=1.2,
+        label="mín.–máx.",
+    )
+    ax.legend(
+        handles=[medias[0], medias[1], rodadas, intervalo],
+        frameon=False,
+        ncols=2,
+        loc="best",
+    )
+
+
 def gerar_grafico(df: pd.DataFrame, dataset: str, destino: Path) -> None:
     dados = df[df["dataset"] == dataset]
     resumo = dados.groupby(["volume_configurado", "arquitetura"])["cpu_media_total"].agg(
         ["mean", "min", "max"]
     )
-    fig, ax = plt.subplots(figsize=(6.6, 4.0))
+    fig, ax = plt.subplots(figsize=(6.6, 3.0))
     posicoes = list(range(len(VOLUMES)))
-    deslocamentos = {"ETL": -0.06, "ELT": 0.06}
-    jitter = [-0.032, -0.016, 0.0, 0.016, 0.032]
 
     for arquitetura in ("ETL", "ELT"):
         estatisticas = resumo.xs(arquitetura, level="arquitetura").reindex(VOLUMES)
-        x_medias = [x + deslocamentos[arquitetura] for x in posicoes]
+        x_medias = [x + DESLOCAMENTOS[arquitetura] for x in posicoes]
         medias = estatisticas["mean"].to_numpy()
         erros = [
             medias - estatisticas["min"].to_numpy(),
@@ -145,7 +203,7 @@ def gerar_grafico(df: pd.DataFrame, dataset: str, destino: Path) -> None:
                 .to_numpy()
             )
             ax.scatter(
-                [x_medias[indice] + ajuste for ajuste in jitter],
+                [x_medias[indice] + ajuste for ajuste in JITTER],
                 observacoes,
                 color=CORES[arquitetura],
                 s=20,
@@ -155,17 +213,8 @@ def gerar_grafico(df: pd.DataFrame, dataset: str, destino: Path) -> None:
                 zorder=4,
             )
 
-    ax.set_xlabel("Volume nominal (registros)")
-    ax.set_ylabel("CPU média total (%)")
-    ax.set_xticks(posicoes, ["100 mil", "250 mil", "500 mil", "1 milhão"])
-    ax.set_ylim(bottom=0)
-    ax.yaxis.grid(True, color="#d9d9d9", linewidth=0.7)
-    ax.set_axisbelow(True)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.spines["left"].set_color("#777777")
-    ax.spines["bottom"].set_color("#777777")
-    ax.legend(title="Arquitetura", frameon=False, ncols=2)
+    configurar_eixos(ax, posicoes, "CPU média total (%)")
+    adicionar_legenda(ax)
     fig.tight_layout()
     fig.savefig(destino, dpi=300, bbox_inches="tight", pad_inches=0.05)
     plt.close(fig)
